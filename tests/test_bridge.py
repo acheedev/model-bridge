@@ -447,7 +447,7 @@ class BridgeTests(unittest.TestCase):
         bridge.ask_codex('continue', mode='open', thread_id=b['thread_id'])
         self.assertNotIn('first', self.consult.call_args.args[0])
         bridge.save_synthesis(a['thread_id'], 'final synthesis')
-        document = json.loads((self.data / (a['thread_id']+'.json')).read_text())
+        document = json.loads(Path(a['transcript']).with_suffix('.json').read_text())
         self.assertEqual(document['provider'], 'codex')
         self.assertEqual([e['kind'] for e in document['events']], ['request', 'response', 'request', 'response', 'synthesis'])
         with bridge.connect() as con:
@@ -587,8 +587,165 @@ class BridgeTests(unittest.TestCase):
         self.consult.assert_not_called()
 
     def test_mcp_registration(self):
-        names = {tool.name for tool in asyncio.run(bridge.mcp.list_tools())}
+        tools = asyncio.run(bridge.mcp.list_tools())
+        names = {tool.name for tool in tools}
         self.assertTrue({'ask_codex', 'ask_claude', 'bridge_ping', 'save_synthesis'} <= names)
+        for tool in tools:
+            if tool.name in ('ask_codex', 'ask_claude'):
+                self.assertIn('title', tool.inputSchema['properties'])
+                self.assertNotIn('title', tool.inputSchema.get('required', []))
+
+    def claude_response(self):
+        response = Mock(model='actual-claude', stop_reason='end_turn')
+        response.content = [SimpleNamespace(type='text', text='Claude answer',
+            model_dump=lambda **kw: {'type': 'text', 'text': 'Claude answer'})]
+        response.usage.model_dump.return_value = {'input_tokens': 1, 'output_tokens': 2}
+        response.model_dump.return_value = {'model': 'actual-claude'}
+        bridge.client.messages.create.return_value = response
+
+    def test_readable_paths_stable_across_followups_synthesis_and_reconnect(self):
+        self.claude_response()
+        for provider, ask in (('codex', bridge.ask_codex), ('claude', bridge.ask_claude)):
+            with patch.object(bridge, 'now', return_value='2026-10-10T13:30:00+00:00'):
+                first = ask('RAW PROMPT MUST NOT BE A FILENAME', title='Python helper')
+            thread, path = first['thread_id'], Path(first['transcript'])
+            self.assertEqual(len(thread), 32)
+            self.assertEqual(path.name, f'2026-10-10_09-30-00-0400_{provider}_python-helper_{thread[:8]}.md')
+            # A later title and a different date must not rename a thread.
+            with patch.object(bridge, 'now', return_value='2026-12-12T15:00:00+00:00'):
+                followup = ask('continue', mode='open', thread_id=thread, title='Different title')
+                synthesis = bridge.save_synthesis(thread, 'Final answer')
+            self.assertEqual(followup['transcript'], str(path))
+            self.assertEqual(synthesis['transcript'], str(path))
+            with bridge.connect() as con:
+                self.assertEqual(bridge.export(con, thread), str(path))
+            document = json.loads(path.with_suffix('.json').read_text())
+            self.assertEqual(document['thread_id'], thread)
+            self.assertEqual(document['title'], 'Python helper')
+            self.assertEqual(document['started_at'], '2026-10-10T13:30:00+00:00')
+            self.assertEqual(len(document['events']), 5)
+            index = (self.data / 'index.md').read_text()
+            for text in (thread, provider, 'Python helper', '2026-10-10T09:30:00-04:00', path.name):
+                self.assertIn(text, index)
+            self.assertNotIn('RAW PROMPT', index)
+            self.assertNotIn('Different title', index)
+
+    def test_sanitization_defaults_and_index_escaping(self):
+        for title, slug in ((None, 'consultation'), ('', 'consultation'), ('../..\\/?!', 'consultation'),
+                            ('你好 🐈', 'consultation'), (' Café / Python: helper! ', 'cafe-python-helper'),
+                            ('x'*200, 'x'*40), ('a'*39 + ' / b', 'a'*39)):
+            result = bridge.ask_codex('secret prompt', title=title)
+            name = Path(result['transcript']).name
+            self.assertIn('_codex_' + slug + '_', name)
+            self.assertRegex(name, r'^[a-z0-9_-]+\.md$')
+            self.assertNotIn('secret', name)
+        result = bridge.ask_codex('question', title='[click](evil) | <script> *bold* `code`\nnext')
+        index = (self.data / 'index.md').read_text()
+        self.assertNotIn('<script>', index)
+        self.assertNotIn('[click]', index)
+        self.assertIn('&lt;script&gt;', index)
+        self.assertIn('&#124;', index)
+        self.assertIn('&#96;', index)
+        self.assertIn(Path(result['transcript']).name, index)
+
+    def test_title_credentials_and_length_rejected_before_consultation(self):
+        self.claude_response()
+        for ask in (bridge.ask_codex, bridge.ask_claude):
+            for kwargs in ({'title': 'x'*201}, {'title': 123}):
+                with self.assertRaises(ValueError): ask('question', **kwargs)
+            with patch.object(bridge, 'bridge_token', 'bridge-secret'):
+                with self.assertRaises(ValueError): ask('question', title='contains bridge-secret')
+            with patch.dict(os.environ, {'OPENAI_API_KEY': 'env-secret'}):
+                with self.assertRaises(ValueError): ask('question', title='contains env-secret')
+        self.consult.assert_not_called()
+        bridge.client.messages.create.assert_not_called()
+        self.assertEqual(list(self.data.iterdir()), [])
+
+    def test_short_id_and_existing_file_collisions(self):
+        ids = ['abcdef01' + '1'*24, 'abcdef01' + '2'*24, 'abcdef01' + '3'*24]
+        with patch.object(bridge, 'now', return_value='2026-01-10T15:00:00+00:00'):
+            with bridge.connect() as con:
+                for thread in ids[:2]:
+                    with patch.object(bridge.uuid, 'uuid4', return_value=SimpleNamespace(hex=thread)):
+                        bridge.create_thread(con, 'codex', 'Same title')
+                first = bridge.export(con, ids[0])
+                second = bridge.export(con, ids[1])
+                self.assertTrue(first.endswith('abcdef01.md'))
+                self.assertTrue(second.endswith('abcdef012222.md'))
+                self.assertIn('10-00-00-0500', first)
+                # An untracked file with the next candidate name is preserved.
+                occupied = self.data / '2026-01-10_10-00-00-0500_codex_same-title_abcdef013333.json'
+                occupied.write_text('do not overwrite')
+                with patch.object(bridge.uuid, 'uuid4', return_value=SimpleNamespace(hex=ids[2])):
+                    bridge.create_thread(con, 'codex', 'Same title')
+                third = bridge.export(con, ids[2])
+                self.assertTrue(third.endswith('abcdef0133333333.md'))
+                self.assertEqual(occupied.read_text(), 'do not overwrite')
+                self.assertEqual(json.loads(Path(first).with_suffix('.json').read_text())['thread_id'], ids[0])
+
+    def test_legacy_files_preserved_and_original_start_migrated(self):
+        thread = 'a'*32
+        with sqlite3.connect(self.data / 'threads.sqlite3') as con:
+            con.execute('CREATE TABLE threads (id TEXT PRIMARY KEY,messages TEXT NOT NULL)')
+            con.execute('INSERT INTO threads VALUES (?,?)', (thread, '[]'))
+            con.execute('CREATE TABLE events (seq INTEGER PRIMARY KEY,thread TEXT NOT NULL,payload TEXT NOT NULL)')
+            con.execute('INSERT INTO events(thread,payload) VALUES (?,?)', (thread, json.dumps({
+                'timestamp': '2025-01-10T15:00:00+00:00', 'kind': 'request'})))
+        legacy_md = self.data / (thread + '.md')
+        legacy_json = self.data / (thread + '.json')
+        legacy_md.write_text('original markdown')
+        legacy_json.write_text('original json')
+        with bridge.connect() as con:
+            bridge.export_index(con)
+            self.assertEqual(con.execute('SELECT started_at FROM threads').fetchone()[0], '2025-01-10T15:00:00+00:00')
+        self.assertEqual(legacy_md.read_text(), 'original markdown')
+        self.assertEqual(legacy_json.read_text(), 'original json')
+        index = (self.data / 'index.md').read_text()
+        self.assertIn('2025-01-10T10:00:00-05:00', index)
+        self.assertIn(f'[MD]({thread}.md)', index)
+        self.claude_response()
+        follow = bridge.ask_claude('continue', mode='open', thread_id=thread, title='New title')
+        self.assertEqual(follow['transcript'], str(legacy_md))
+        self.assertEqual(bridge.save_synthesis(thread, 'final')['transcript'], str(legacy_md))
+        self.assertEqual(len(list(self.data.glob('*.json'))), 1)
+        self.assertEqual(json.loads(legacy_json.read_text())['title'], 'Consultation')
+
+    def test_dst_repeated_hour_has_distinct_offsets(self):
+        names = []
+        for timestamp in ('2026-11-01T05:30:00+00:00', '2026-11-01T06:30:00+00:00'):
+            with patch.object(bridge, 'now', return_value=timestamp):
+                result = bridge.ask_codex('question', title='DST')
+            names.append(Path(result['transcript']).name)
+        self.assertIn('_01-30-00-0400_', names[0])
+        self.assertIn('_01-30-00-0500_', names[1])
+
+    def test_all_filename_candidates_occupied_fails_without_overwriting(self):
+        thread = 'c'*32
+        prefix = '2026-01-10_10-00-00-0500_codex_consultation_'
+        for length in range(8, 33, 4):
+            (self.data / (prefix + thread[:length] + '.md')).write_text('keep me')
+        with bridge.connect() as con, patch.object(bridge, 'now', return_value='2026-01-10T15:00:00+00:00'), \
+                patch.object(bridge.uuid, 'uuid4', return_value=SimpleNamespace(hex=thread)):
+            with self.assertRaisesRegex(ValueError, 'collision'):
+                bridge.create_thread(con, 'codex', 'Consultation')
+            self.assertEqual(con.execute('SELECT COUNT(*) FROM threads').fetchone()[0], 0)
+        for path in self.data.glob('*.md'):
+            self.assertEqual(path.read_text(), 'keep me')
+
+    def test_legacy_no_events_uses_file_time_once(self):
+        thread = 'b'*32
+        with sqlite3.connect(self.data / 'threads.sqlite3') as con:
+            con.execute('CREATE TABLE threads (id TEXT PRIMARY KEY,messages TEXT NOT NULL,provider TEXT NOT NULL)')
+            con.execute('INSERT INTO threads VALUES (?,?,?)', (thread, '[]', 'codex'))
+        path = self.data / (thread + '.md')
+        path.write_text('legacy')
+        os.utime(path, (0, 0))
+        with bridge.connect() as con:
+            started = con.execute('SELECT started_at FROM threads').fetchone()[0]
+        os.utime(path, (1000, 1000))
+        with bridge.connect() as con:
+            self.assertEqual(con.execute('SELECT started_at FROM threads').fetchone()[0], started)
+        self.assertEqual(started, '1970-01-01T00:00:00+00:00')
 
     def test_codex_only_startup_without_anthropic_key(self):
         (self.data / 'bridge.token').write_text('b'*32)

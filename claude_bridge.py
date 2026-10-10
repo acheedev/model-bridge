@@ -10,17 +10,20 @@ BRIDGE_MAX_TOKENS defaults to 4096; BRIDGE_MAX_CALLS defaults to 20 per process.
 The call limit is a guardrail, not a dollar budget; restarting resets it.
 No automatic API retries. One server process only. Do not expose publicly.
 """
+import html
 import json
 import os
 import re
 import secrets
 import sqlite3
 import threading
+import unicodedata
 import uuid
 from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated, Literal
+from zoneinfo import ZoneInfo
 
 import uvicorn
 from anthropic import Anthropic
@@ -62,7 +65,77 @@ def connect():
         con.execute("ALTER TABLE threads ADD COLUMN provider TEXT NOT NULL DEFAULT 'claude'")
         con.commit()
     con.execute('CREATE TABLE IF NOT EXISTS events (seq INTEGER PRIMARY KEY, thread TEXT NOT NULL, payload TEXT NOT NULL)')
+    columns = {row[1] for row in con.execute('PRAGMA table_info(threads)')}
+    for column in ('title', 'started_at', 'transcript_stem'):
+        if column not in columns:
+            con.execute(f'ALTER TABLE threads ADD COLUMN {column} TEXT')
+    # Pin old threads to their existing UUID filenames; never rename their files.
+    for thread, in con.execute('SELECT id FROM threads WHERE transcript_stem IS NULL').fetchall():
+        first = con.execute('SELECT payload FROM events WHERE thread=? ORDER BY seq LIMIT 1', (thread,)).fetchone()
+        existing = next((DATA / (thread + suffix) for suffix in ('.md', '.json')
+                         if (DATA / (thread + suffix)).exists()), None)
+        started = (json.loads(first[0])['timestamp'] if first else
+                   datetime.fromtimestamp(existing.stat().st_mtime, timezone.utc).isoformat() if existing else now())
+        con.execute('UPDATE threads SET title=?,started_at=?,transcript_stem=? WHERE id=?',
+                    ('Consultation', started, thread, thread))
+    con.execute('CREATE UNIQUE INDEX IF NOT EXISTS transcript_stems ON threads(transcript_stem)')
+    con.commit()
     return con
+
+
+def validate_title(title):
+    if title is None:
+        return 'Consultation'
+    if not isinstance(title, str) or len(title) > 200:
+        raise ValueError('title must be a string of at most 200 characters.')
+    check_text(title)
+    if not codex_runner.prompt_is_safe(title, (api_key, bridge_token)):
+        raise ValueError('Title contains a credential. Remove it before consulting.')
+    return ' '.join(title.split()) or 'Consultation'
+
+
+def title_slug(title):
+    ascii_title = unicodedata.normalize('NFKD', title).encode('ascii', 'ignore').decode().lower()
+    return re.sub(r'[^a-z0-9]+', '-', ascii_title).strip('-')[:40].rstrip('-') or 'consultation'
+
+
+def create_thread(con, provider, title):
+    thread = uuid.uuid4().hex
+    started = now()
+    stamp = datetime.fromisoformat(started).astimezone(ZoneInfo('America/New_York')).strftime('%Y-%m-%d_%H-%M-%S%z')
+    prefix = f'{stamp}_{provider}_{title_slug(title)}_'
+    for length in range(8, 33, 4):
+        stem = prefix + thread[:length]
+        if (not con.execute('SELECT 1 FROM threads WHERE transcript_stem=?', (stem,)).fetchone()
+                and not any((DATA / (stem + suffix)).exists() for suffix in ('.md', '.json'))):
+            break
+    else:
+        raise ValueError('Transcript filename collision. No files were overwritten.')
+    con.execute('INSERT INTO threads(id,messages,provider,title,started_at,transcript_stem) VALUES (?,?,?,?,?,?)',
+                (thread, '[]', provider, title, started, stem))
+    con.commit()
+    return thread
+
+
+def atomic_text(target, content):
+    temporary = target.with_suffix(target.suffix + '.tmp')
+    temporary.write_text(content, encoding='utf-8')
+    os.replace(temporary, target)
+
+
+def export_index(con):
+    markdown = '# Consultation transcripts\n\nStart times are in America/New_York (with UTC offset).\n\n'
+    markdown += '| Title | Provider | Start time | Full thread ID | Transcripts |\n| --- | --- | --- | --- | --- |\n'
+    for thread, provider, title, started, stem in con.execute(
+            'SELECT id,provider,title,started_at,transcript_stem FROM threads ORDER BY started_at,id'):
+        links = [f'[{suffix.upper()}]({stem}.{suffix})' for suffix in ('md', 'json')
+                 if (DATA / (stem + '.' + suffix)).exists()]
+        safe_title = html.escape(title)
+        for character in '|[]*_`\\':
+            safe_title = safe_title.replace(character, f'&#{ord(character)};')
+        local_start = datetime.fromisoformat(started).astimezone(ZoneInfo('America/New_York')).isoformat(timespec='seconds')
+        markdown += f'| {safe_title} | {provider} | {local_start} | `{thread}` | {" · ".join(links)} |\n'
+    atomic_text(DATA / 'index.md', markdown)
 
 
 def event(con, thread, kind, **fields):
@@ -84,18 +157,17 @@ def load_thread(con, thread, provider='claude'):
 
 def export(con, thread):
     events = [json.loads(row[0]) for row in con.execute('SELECT payload FROM events WHERE thread=? ORDER BY seq', (thread,))]
-    provider = con.execute('SELECT provider FROM threads WHERE id=?', (thread,)).fetchone()[0]
-    document = {'thread_id': thread, 'provider': provider, 'events': events}
+    provider, title, started, stem = con.execute(
+        'SELECT provider,title,started_at,transcript_stem FROM threads WHERE id=?', (thread,)).fetchone()
+    document = {'thread_id': thread, 'provider': provider, 'title': title, 'started_at': started, 'events': events}
     markdown = '# ' + provider.capitalize() + ' consultation ' + thread + '\n'
     for entry in events:
         markdown += '\n## ' + entry['timestamp'] + ' | ' + entry['kind'] + '\n\n'
         markdown += '```json\n' + json.dumps(entry, ensure_ascii=False, indent=2) + '\n```\n'
     for suffix, content in [('json', json.dumps(document, ensure_ascii=False, indent=2)), ('md', markdown)]:
-        target = DATA / (thread + '.' + suffix)
-        temporary = target.with_suffix('.' + suffix + '.tmp')
-        temporary.write_text(content, encoding='utf-8')
-        os.replace(temporary, target)
-    return str(DATA / (thread + '.md'))
+        atomic_text(DATA / (stem + '.' + suffix), content)
+    export_index(con)
+    return str(DATA / (stem + '.md'))
 
 
 def check_text(*values):
@@ -121,7 +193,7 @@ def bridge_ping(message: str = 'bridge check') -> dict:
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, openWorldHint=True))
 def ask_claude(question: str, mode: Literal['independent', 'critique', 'open'] = 'independent',
-               context: str = '', other_answer: str = '', thread_id: str = '') -> dict:
+               context: str = '', other_answer: str = '', thread_id: str = '', title: str | None = None) -> dict:
     """Consult Claude when the user requests a second opinion. Costs API credits.
 
     Send the user's question verbatim and relevant background in context.
@@ -130,9 +202,11 @@ def ask_claude(question: str, mode: Literal['independent', 'critique', 'open'] =
     Open: reuse thread_id for follow-up discussion.
     Returns Claude's text, model, token usage, stop reason, and transcript path.
     After synthesis use save_synthesis to record ChatGPT's final answer.
+    Optional title labels a new thread; follow-ups retain the original title and path.
     """
     global calls
     check_text(question, context, other_answer)
+    title = validate_title(title)
     if not question.strip():
         raise ValueError('question is required.')
     if mode not in MODES:
@@ -152,9 +226,7 @@ def ask_claude(question: str, mode: Literal['independent', 'critique', 'open'] =
         if calls >= MAX_CALLS:
             raise ValueError('Per-process paid-call limit reached. Review usage before restarting.')
         if not thread_id:
-            thread_id = uuid.uuid4().hex
-            con.execute('INSERT INTO threads(id,messages) VALUES (?,?)', (thread_id, '[]'))
-            con.commit()
+            thread_id = create_thread(con, 'claude', title)
         request = {'model': MODEL, 'max_tokens': MAX_TOKENS,
                    'system': BASE + '\n\n' + MODES[mode], 'messages': messages}
         call_id = uuid.uuid4().hex
@@ -188,7 +260,8 @@ def ask_codex(question: str, mode: Literal['independent', 'critique', 'open'] = 
               context: str = '', other_answer: str = '', thread_id: str = '',
               task: Literal['question', 'code_generation'] = 'question',
               model: str | None = None, reasoning_effort: str | None = None,
-              timeout_seconds: Annotated[float, Field(strict=True, gt=0, le=1800, allow_inf_nan=False)] | None = None) -> dict:
+              timeout_seconds: Annotated[float, Field(strict=True, gt=0, le=1800, allow_inf_nan=False)] | None = None,
+              title: str | None = None) -> dict:
     """Consult Codex using saved ChatGPT login through an isolated local CLI.
 
     Independent starts fresh without thread_id or other_answer. Critique requires
@@ -201,10 +274,12 @@ def ask_codex(question: str, mode: Literal['independent', 'critique', 'open'] = 
     reported model. Deadline defaults: question 120s, code_generation 900s;
     timeout_seconds must be positive, finite, and at most 1800s.
     Use save_synthesis to record the final synthesis without another consultation.
+    Optional title labels a new thread; follow-ups retain the original title and path.
     """
     if os.environ.get(codex_runner.CHILD_MARKER):
         return {'status': 'error', 'error': {'code': 'recursive_call', 'message': 'Bridge calls are disabled in Codex child runs.'}}
     check_text(question, context, other_answer)
+    title = validate_title(title)
     if not question.strip() or mode not in MODES:
         raise ValueError('A question and valid mode are required.')
     if mode == 'independent' and (thread_id or other_answer):
@@ -239,9 +314,7 @@ def ask_codex(question: str, mode: Literal['independent', 'critique', 'open'] = 
             if not codex_runner.prompt_is_safe(prompt + '\n' + (model or '') + '\n' + (reasoning_effort or ''), (api_key, bridge_token)):
                 return {'status': 'error', 'error': {'code': 'credential_in_prompt', 'message': 'Prompt contains a credential; remove it before consulting Codex.'}}
             if not thread_id:
-                thread_id = uuid.uuid4().hex
-                con.execute('INSERT INTO threads(id,messages,provider) VALUES (?,?,?)', (thread_id, '[]', 'codex'))
-                con.commit()
+                thread_id = create_thread(con, 'codex', title)
             call_id = uuid.uuid4().hex
             event(con, thread_id, 'request', call_id=call_id, provider='codex', mode=mode,
                   request={'transport': 'codex exec', 'authentication': 'chatgpt', 'prompt': prompt,
@@ -311,6 +384,8 @@ def initialize():
         raise ValueError('Invalid bridge token.')
     DATA.mkdir(parents=True, exist_ok=True)
     DATA.chmod(0o700)
+    with LOCK, closing(connect()) as con:
+        export_index(con)
     client = Anthropic(api_key=api_key, timeout=60.0, max_retries=0) if api_key else None
     return BearerGate(mcp.streamable_http_app(), bridge_token)
 

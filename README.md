@@ -134,6 +134,30 @@ successful conversation history. Requests are exported before child execution;
 responses, JSONL events, errors, and synthesis use the existing JSON/Markdown
 transcripts in `BRIDGE_DATA_DIR` (default `~/model-bridge/transcripts`).
 
+Both consultation tools accept an optional `title` (at most 200 characters).
+Use a short descriptive label, never credentials. Omitted or blank titles use
+`Consultation`; titles are never derived from the question or context. Titles
+are checked against known credentials before any consultation or persistence.
+New transcript pairs use names such as
+`2026-10-10_09-30-00-0400_codex_python-helper_ab12cd34.md` (and `.json`): the
+thread's original start time in America/New_York, including its UTC offset,
+provider, a sanitized ASCII title slug of at most 40 characters, and an
+eight-character ID prefix. Conflicting database names or existing files extend
+the ID prefix until unique; existing files are never overwritten by a new thread.
+The full 32-character UUID remains the thread ID in SQLite, tool results and
+transcripts. The original title, start time, and chosen filename are persisted;
+follow-up titles are ignored, and follow-ups and synthesis saves reuse that path
+even after restart.
+
+`index.md` lists titles, providers, New York start times, full thread IDs, and
+relative Markdown/JSON transcript links. It refreshes at startup and after each
+export. Existing threads retain their UUID filenames; migration does not rename,
+delete or rewrite their transcripts. Subsequent turns append to those same
+transcripts as before. Legacy start times use the first recorded event; if none
+exists, migration uses the existing transcript's modification time, or migration
+time if neither a file nor an event exists, and preserves that fallback thereafter.
+Legacy titles use `Consultation`, without extracting prompts into the index.
+
 The child receives its prompt through stdin using a subprocess argument list and
 `shell=False` (no command interpolation). Each request uses a private temporary
 Codex home containing only subscription authentication and a separate empty
