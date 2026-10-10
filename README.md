@@ -132,7 +132,10 @@ threads are tagged by provider, and existing untagged threads migrate to Claude.
 A thread cannot cross providers. Failed turns are recorded but do not change
 successful conversation history. Requests are exported before child execution;
 responses, JSONL events, errors, and synthesis use the existing JSON/Markdown
-transcripts in `BRIDGE_DATA_DIR` (default `~/model-bridge/transcripts`).
+transcripts in `BRIDGE_DATA_DIR` (default `transcripts/` beside `claude_bridge.py`,
+independent of the working directory). In this checkout that is
+`/home/jachee/projects/acheedev/model-bridge/transcripts`. Set `BRIDGE_DATA_DIR`
+only when intentionally choosing another data location.
 
 Both consultation tools accept an optional `title` (at most 200 characters).
 Use a short descriptive label, never credentials. Omitted or blank titles use

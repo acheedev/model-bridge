@@ -4,7 +4,7 @@ Run: CLAUDE_MODEL=claude-haiku-5-5 BRIDGE_MAX_TOKENS=4096 python claude_bridge.p
 See README.md for the absolute WSL startup command and CODEX_BIN setting.
 Endpoint: http://127.0.0.1:8081/mcp
 Header: Authorization: Bearer <contents of ~/.config/model-bridge/bridge.token>
-Secrets stay in ~/.config/model-bridge; transcripts in ~/model-bridge/transcripts.
+Secrets stay in ~/.config/model-bridge; transcripts beside this script in transcripts/.
 CLAUDE_MODEL defaults to claude-sonnet-5-5. Set it to claude-haiku-5-5 for tests.
 BRIDGE_MAX_TOKENS defaults to 4096; BRIDGE_MAX_CALLS defaults to 20 per process.
 The call limit is a guardrail, not a dollar budget; restarting resets it.
@@ -33,7 +33,7 @@ from pydantic import Field
 import codex_runner
 
 CONFIG = Path.home() / '.config/model-bridge'
-DATA = Path(os.environ.get('BRIDGE_DATA_DIR', str(Path.home() / 'model-bridge/transcripts'))).expanduser()
+DATA = Path(os.environ.get('BRIDGE_DATA_DIR', str(Path(__file__).resolve().parent / 'transcripts'))).expanduser()
 MODEL = os.environ.get('CLAUDE_MODEL', 'claude-sonnet-5-5')
 MAX_TOKENS = int(os.environ.get('BRIDGE_MAX_TOKENS', '4096'))
 MAX_CALLS = int(os.environ.get('BRIDGE_MAX_CALLS', '20'))
