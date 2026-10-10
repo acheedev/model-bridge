@@ -18,7 +18,7 @@ CODEX_BIN='/home/jachee/.vscode-server/extensions/openai.chatgpt-26.1007.21434-l
 ```
 
 The endpoint is `http://127.0.0.1:8081/mcp`. Clients must send the bearer token
-stored in `~/.config/model-bridge/bridge.token`. Do not print or commit that file.
+stored in `~/.codex/model-bridge/bridge.token`. Do not print or commit that file.
 Run only one bridge process at a time. Stop the existing bridge before starting
 this command; this change does not restart the running server.
 
@@ -51,7 +51,7 @@ commands were executed as part of this implementation.
 The bridge currently supports saved **file** authentication at
 `${CODEX_HOME:-$HOME/.codex}/auth.json`. Keyring-only and external-token login
 are rejected clearly; they do not fall back to API keys. No OpenAI key is needed.
-`~/.config/model-bridge/anthropic.key` remains optional at startup: when present,
+`~/.codex/model-bridge/anthropic.key` remains optional at startup: when present,
 Claude retains its existing API behavior; when absent, Codex and local tools can
 still run, while `ask_claude` reports that it is not initialized. Python requires
 3.10+ and the existing `mcp`, `anthropic`, and `uvicorn` dependencies.
@@ -62,7 +62,7 @@ still run, while `ask_claude` reports that it is not initialized. Python require
 and `task="code_generation"`. Code generation returns the completed answer as
 text; the bridge never executes that generated code or writes it to a project.
 Supply source snippets and requirements in `context`. Both tasks use the same
-empty temporary working directory, ignored user config/rules, read-only sandbox,
+empty temporary working directory under the project’s `tmp/`, ignored user config/rules, read-only sandbox,
 disabled tool integrations, and subscription authentication. There is no project
 path argument. Inspecting or editing project files requires the separate design
 below and is not enabled by choosing code generation.
@@ -178,7 +178,7 @@ rejected before request logging and redacted from returned events. Raw stderr is
 never returned or persisted. Temporary credential copies are private and removed
 on completion. CLI token refreshes are saved atomically with private file permissions
 in a **separate bridge-owned cache**, defaulting to
-`~/.config/model-bridge/codex-auth-cache.json` (override with
+`~/.codex/model-bridge/codex-auth-cache.json` (override with
 `BRIDGE_CODEX_AUTH_CACHE`). The bridge never writes the source Codex `auth.json`;
 it does not attempt a check-then-replace against that shared file. Cache updates
 are atomic to avoid partial files, not to provide compare-and-swap against
@@ -322,3 +322,7 @@ git diff --check
 
 Recheck CLI compatibility after upgrading or replacing the executable. Unsupported
 flags/configuration fail rather than removing sandbox or authentication guards.
+
+Consultation and capability-check temporary directories live in `tmp/` beside
+`codex_runner.py`, are private, and are removed after each call. The child CLI
+also receives `TMPDIR` inside its private directory. `tmp/` is Git-ignored.

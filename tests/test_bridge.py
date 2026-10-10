@@ -61,6 +61,8 @@ class RunnerTests(unittest.TestCase):
             self.assertFalse(kw['shell'])
             self.assertTrue(kw['start_new_session'])
             self.assertEqual(list(Path(kw['cwd']).iterdir()), [])
+            self.assertTrue(Path(kw['cwd']).resolve().is_relative_to(runner.PROJECT_ROOT / 'tmp'))
+            self.assertTrue(Path(kw['env']['TMPDIR']).resolve().is_relative_to(runner.PROJECT_ROOT / 'tmp'))
             self.assertNotEqual(kw['env']['CODEX_HOME'], str(self.home))
             auth = json.loads((Path(kw['env']['CODEX_HOME']) / 'auth.json').read_text())
             self.assertNotIn('OPENAI_API_KEY', auth)

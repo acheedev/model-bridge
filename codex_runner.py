@@ -12,6 +12,7 @@ import time
 from pathlib import Path
 
 CHILD_MARKER = 'MODEL_BRIDGE_CHILD'
+PROJECT_ROOT = Path(__file__).resolve().parent
 TERMINATE_GRACE_SECONDS = 2
 REAP_GRACE_SECONDS = 2
 CLEANUP_SECONDS = TERMINATE_GRACE_SECONDS + REAP_GRACE_SECONDS
@@ -90,10 +91,18 @@ def validate_options(task='question', model=None, reasoning_effort=None, timeout
             'requested_reasoning_effort': reasoning_effort, 'timeout_seconds': seconds}
 
 
+def temporary_root():
+    root = PROJECT_ROOT / 'tmp'
+    if not root.resolve().is_relative_to(PROJECT_ROOT):
+        raise CodexFailure('invalid_temp_directory', 'Project tmp directory must stay inside the project.')
+    root.mkdir(mode=0o700, exist_ok=True)
+    return root
+
+
 def discover_capabilities(*, deadline, binary=None):
     """Read this executable's bundled catalog offline; never use auth or inference."""
     binary = binary or executable()
-    with tempfile.TemporaryDirectory(prefix='model-bridge-capabilities-') as root:
+    with tempfile.TemporaryDirectory(prefix='model-bridge-capabilities-', dir=temporary_root()) as root:
         home, work = Path(root) / 'home', Path(root) / 'work'
         home.mkdir(mode=0o700)
         work.mkdir(mode=0o700)
@@ -147,7 +156,7 @@ def auth_fingerprint(auth):
 
 def auth_cache_path():
     target = Path(os.environ.get('BRIDGE_CODEX_AUTH_CACHE', str(
-        Path.home() / '.config/model-bridge/codex-auth-cache.json'))).expanduser()
+        Path.home() / '.codex/model-bridge/codex-auth-cache.json'))).expanduser()
     source = Path(os.environ.get('CODEX_HOME', str(Path.home() / '.codex'))).expanduser() / 'auth.json'
     if target.resolve() == source.resolve():
         raise CodexFailure('invalid_auth_cache', 'BRIDGE_CODEX_AUTH_CACHE must be separate from the saved Codex auth.json.')
@@ -223,7 +232,7 @@ def child_environment(home):
     # Allowlist prevents OPENAI_API_KEY, CODEX_API_KEY, CODEX_ACCESS_TOKEN,
     # provider/base URL overrides, VS Code state, and bridge credentials leaking in.
     env = {key: os.environ[key] for key in ('HOME', 'PATH', 'LANG', 'LC_ALL', 'TZ', 'SSL_CERT_FILE', 'SSL_CERT_DIR') if key in os.environ}
-    env.update(CODEX_HOME=str(home), MODEL_BRIDGE_CHILD='1')
+    env.update(CODEX_HOME=str(home), MODEL_BRIDGE_CHILD='1', TMPDIR=str(home.parent))
     return env
 
 
@@ -341,7 +350,7 @@ def consult(prompt, extra_secrets=(), *, deadline=None, task='question', model=N
         if model is not None:
             catalog = discover_capabilities(deadline=deadline, binary=binary)
             validate_selection(catalog, model, reasoning_effort)
-        with tempfile.TemporaryDirectory(prefix='model-bridge-codex-') as root:
+        with tempfile.TemporaryDirectory(prefix='model-bridge-codex-', dir=temporary_root()) as root:
             home, work = Path(root) / 'home', Path(root) / 'work'
             home.mkdir(mode=0o700)
             work.mkdir(mode=0o700)
