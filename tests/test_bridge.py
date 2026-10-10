@@ -24,6 +24,11 @@ SUCCESS = jsonl(
     {'type': 'item.completed', 'item': {'id': 'item_0', 'type': 'agent_message', 'text': 'Bridge confirmed.'}},
     {'type': 'turn.completed', 'usage': {'input_tokens': 12, 'cached_input_tokens': 3, 'output_tokens': 4}},
 )
+CATALOG = json.dumps({'models': [
+    {'slug': 'capable-model', 'supported_reasoning_levels': [
+        {'effort': effort} for effort in ('medium', 'high', 'xhigh', 'ultra')], 'tool_mode': 'code_mode_only'},
+    {'slug': 'limited-model', 'supported_reasoning_levels': [{'effort': 'medium'}]},
+]})
 
 
 class RunnerTests(unittest.TestCase):
@@ -170,6 +175,116 @@ class RunnerTests(unittest.TestCase):
             with patch.dict(os.environ, {'CODEX_TIMEOUT_SECONDS': value}):
                 self.assertEqual(runner.consult('hello')['error']['code'], 'invalid_timeout')
 
+    def test_per_call_validation_blocks_processes(self):
+        invalid = [({'timeout_seconds': value}, 'invalid_timeout') for value in
+                   (True, False, '900', 0, -1, 1801, float('nan'), float('inf'), 10**400)]
+        invalid += [({'task': 'project_edit'}, 'invalid_task'),
+                    ({'model': ''}, 'invalid_selection'),
+                    ({'model': 'bad model'}, 'invalid_selection'),
+                    ({'reasoning_effort': 'high'}, 'model_required'),
+                    ({'model': 'capable-model', 'reasoning_effort': 'high"'}, 'invalid_selection')]
+        with patch.object(runner.subprocess, 'Popen') as spawn:
+            for kwargs, error in invalid:
+                with self.subTest(kwargs=kwargs):
+                    self.assertEqual(runner.consult('hello', **kwargs)['error']['code'], error)
+            spawn.assert_not_called()
+
+    def test_task_defaults_override_and_maximum(self):
+        self.assertEqual(runner.timeout_seconds(), 120)
+        self.assertEqual(runner.timeout_seconds(task='code_generation'), 900)
+        with patch.dict(os.environ, {'CODEX_TIMEOUT_SECONDS': '8'}):
+            self.assertEqual(runner.timeout_seconds(), 8)
+            self.assertEqual(runner.timeout_seconds(task='code_generation'), 900)
+            self.assertEqual(runner.timeout_seconds(60, 'question'), 60)
+        self.assertEqual(runner.timeout_seconds(1800), 1800)
+        self.assertEqual(runner.timeout_seconds(0.5), 0.5)
+
+    def test_catalog_discovery_is_offline_without_auth(self):
+        def spawn(argv, **kw):
+            self.assertEqual(argv[-3:], ['debug', 'models', '--bundled'])
+            self.assertFalse((Path(kw['env']['CODEX_HOME']) / 'auth.json').exists())
+            self.assertEqual(list(Path(kw['cwd']).iterdir()), [])
+            self.assertNotIn('OPENAI_API_KEY', kw['env'])
+            return self.process(CATALOG)
+        with patch.object(runner.subprocess, 'Popen', side_effect=spawn):
+            catalog = runner.discover_capabilities(deadline=runner.consultation_deadline())
+        self.assertEqual(catalog['capable-model']['reasoning_efforts'], ['medium', 'high', 'xhigh', 'ultra'])
+
+    def test_exact_model_effort_arguments_and_unknown_reported_model(self):
+        for effort in ('medium', 'high', 'xhigh', 'ultra'):
+            processes = [self.process(CATALOG), self.process('Logged in using ChatGPT'),
+                         self.process('[]'), self.process(SUCCESS)]
+            with patch.object(runner.subprocess, 'Popen', side_effect=processes) as spawn:
+                result = runner.consult('author code', task='code_generation', model='capable-model',
+                                        reasoning_effort=effort, timeout_seconds=60)
+            self.assertEqual(result['status'], 'ok')
+            self.assertEqual(result['requested_model'], 'capable-model')
+            self.assertEqual(result['requested_reasoning_effort'], effort)
+            self.assertIsNone(result['model'])
+            argv = spawn.call_args.args[0]
+            self.assertEqual(argv[argv.index('--model')+1], 'capable-model')
+            self.assertGreater(argv.index('--model'), argv.index('exec'))
+            self.assertIn('model_reasoning_effort="'+effort+'"', argv)
+            self.assertEqual(argv[argv.index('--sandbox')+1], 'read-only')
+            self.assertNotIn('--add-dir', argv)
+            self.assertEqual(spawn.call_count, 4)
+
+    def test_unsupported_selections_stop_before_exec(self):
+        for model, effort, error in [('unknown-model', 'medium', 'unsupported_model'),
+                                     ('limited-model', 'ultra', 'unsupported_reasoning_effort')]:
+            with patch.object(runner.subprocess, 'Popen', return_value=self.process(CATALOG)) as spawn:
+                result = runner.consult('hello', model=model, reasoning_effort=effort)
+            self.assertEqual(result['error']['code'], error)
+            self.assertEqual(result['requested_model'], model)
+            self.assertEqual(spawn.call_count, 1)
+            self.assertEqual(spawn.call_args.args[0][-1], '--bundled')
+
+    def test_model_only_keeps_effort_unspecified(self):
+        processes = [self.process(CATALOG), self.process('Logged in using ChatGPT'),
+                     self.process('[]'), self.process(SUCCESS)]
+        with patch.object(runner.subprocess, 'Popen', side_effect=processes) as spawn:
+            result = runner.consult('hello', model='capable-model')
+        self.assertEqual(result['status'], 'ok')
+        self.assertIsNone(result['requested_reasoning_effort'])
+        self.assertFalse(any(arg.startswith('model_reasoning_effort=') for arg in spawn.call_args.args[0]))
+
+    def test_catalog_failure_never_falls_back(self):
+        for output, code in [('not json', 0), ('{"models": []}', 0), (CATALOG, 1),
+                             ('{"models": [{}]}', 0)]:
+            with patch.object(runner.subprocess, 'Popen', return_value=self.process(output, code)) as spawn:
+                result = runner.consult('hello', model='capable-model')
+            self.assertEqual(result['error']['code'], 'capabilities_unavailable')
+            self.assertEqual(spawn.call_count, 1)
+
+    def test_capability_discovery_shares_consultation_deadline(self):
+        clock = [100.0]
+        outputs = [CATALOG, 'Logged in using ChatGPT', '[]', SUCCESS]
+        processes = [self.process(output) for output in outputs]
+        for proc, output in zip(processes, outputs):
+            def communicate(output=output, **kw):
+                clock[0] += 2
+                return output, ''
+            proc.communicate.side_effect = communicate
+        with patch.object(runner.time, 'monotonic', side_effect=lambda: clock[0]), patch.object(runner.subprocess, 'Popen', side_effect=processes):
+            result = runner.consult('code', model='capable-model', task='code_generation', timeout_seconds=10)
+        self.assertEqual(result['status'], 'ok')
+        self.assertEqual([p.communicate.call_args.kwargs['timeout'] for p in processes], [10, 8, 6, 4])
+
+    def test_model_selection_credentials_are_rejected_and_redacted(self):
+        with patch.object(runner.subprocess, 'Popen') as spawn:
+            result = runner.consult('safe prompt', model='private-access-credential')
+        self.assertEqual(result['error']['code'], 'credential_in_prompt')
+        self.assertNotIn('private-access-credential', json.dumps(result))
+        spawn.assert_not_called()
+
+    def test_code_mode_diagnostic_is_visible_and_does_not_invent_model(self):
+        diagnostic = {'type': 'item.completed', 'item': {'type': 'error', 'message': 'Code Mode is unavailable; private-access-credential'}}
+        result = runner.parse_events(jsonl(diagnostic) + '\n' + SUCCESS, 0, ['private-access-credential'])
+        self.assertEqual(result['status'], 'ok')
+        self.assertEqual(len(result['warnings']), 1)
+        self.assertIn('[REDACTED]', result['warnings'][0]['message'])
+        self.assertIsNone(result['model'])
+
     def test_recursion_and_credentials_in_prompt(self):
         with patch.object(runner.subprocess, 'Popen') as spawn:
             with patch.dict(os.environ, {'MODEL_BRIDGE_CHILD': '1'}):
@@ -293,13 +408,14 @@ class RunnerTests(unittest.TestCase):
         text = '[mcp_servers.other]\ntool_timeout_sec = 9\n[mcp_servers.model-bridge]\nurl = "local-url"\nhttp_headers_helper = "private-helper"\n[features]\nplugins = true\n'
         path.write_text(text)
         with patch.dict(os.environ, {'CODEX_TIMEOUT_SECONDS': '120'}):
-            self.assertEqual(client_config.configure(path), 130)
+            self.assertEqual(client_config.configure(path), 1811)
         updated = path.read_text()
-        self.assertIn('[mcp_servers.model-bridge]\ntool_timeout_sec = 130\n', updated)
-        self.assertEqual(updated.replace('tool_timeout_sec = 130\n', ''), text)
-        self.assertEqual(client_config.aligned_config(updated, 130), updated)
+        self.assertIn('[mcp_servers.model-bridge]\ntool_timeout_sec = 1811\n', updated)
+        self.assertEqual(updated.replace('tool_timeout_sec = 1811\n', ''), text)
+        self.assertEqual(client_config.aligned_config(updated, 1811), updated)
         with patch.dict(os.environ, {'CODEX_TIMEOUT_SECONDS': '7.1'}):
-            self.assertEqual(client_config.configure(path), 18)
+            self.assertEqual(client_config.configure(path), 1811)
+        self.assertGreater(runner.mcp_timeout_seconds(), runner.MAX_TIMEOUT_SECONDS + runner.CLEANUP_SECONDS + runner.MCP_RESPONSE_MARGIN_SECONDS)
         self.assertIn('tool_timeout_sec = 9', path.read_text())
         with self.assertRaises(ValueError): client_config.aligned_config('[features]\n', 130)
 
@@ -375,6 +491,59 @@ class BridgeTests(unittest.TestCase):
             bridge.ask_codex('hello')
         self.assertEqual(self.consult.call_args.kwargs['deadline'], 220)
 
+    def test_code_generation_returns_unexecuted_text_and_records_selection(self):
+        code = 'raise RuntimeError("generated code must never execute")'
+        self.consult.return_value = {**self.result, 'text': code}
+        with patch.object(runner.time, 'monotonic', return_value=100):
+            result = bridge.ask_codex('Write Python', context='supplied sources', task='code_generation',
+                                     model='capable-model', reasoning_effort='ultra')
+        self.assertEqual(result['text'], code)
+        self.assertIsNone(result['model'])
+        self.assertEqual(result['requested_model'], 'capable-model')
+        self.assertEqual(result['requested_reasoning_effort'], 'ultra')
+        self.assertEqual(result['timeout_seconds'], 900)
+        self.assertEqual(self.consult.call_args.kwargs['deadline'], 1000)
+        self.assertEqual(self.consult.call_args.kwargs['timeout_seconds'], 900)
+        self.assertIn('return it as text', self.consult.call_args.args[0])
+        self.assertIn('supplied sources', self.consult.call_args.args[0])
+        doc = json.loads(Path(result['transcript']).with_suffix('.json').read_text())
+        request = doc['events'][0]['request']
+        self.assertEqual(request['requested_model'], 'capable-model')
+        self.assertEqual(request['timeout_seconds'], 900)
+        self.assertNotIn('model', request)
+
+    def test_custom_deadline_also_includes_lock_wait(self):
+        lock = Mock()
+        lock.acquire.return_value = False
+        with patch.object(bridge, 'LOCK', lock), patch.object(runner.time, 'monotonic', return_value=100):
+            result = bridge.ask_codex('code', task='code_generation', timeout_seconds=1800)
+        self.assertEqual(result['error']['code'], 'timeout')
+        lock.acquire.assert_called_once_with(timeout=1800)
+        self.consult.assert_not_called()
+
+    def test_invalid_options_do_not_consult_or_persist(self):
+        for kwargs in ({'task': 'project_edit'}, {'reasoning_effort': 'high'},
+                       {'timeout_seconds': True}, {'timeout_seconds': 1801}, {'model': ''}):
+            self.assertEqual(bridge.ask_codex('hello', **kwargs)['status'], 'error')
+        self.consult.assert_not_called()
+        self.assertEqual(list(self.data.iterdir()), [])
+
+    def test_selection_credentials_are_not_persisted(self):
+        with patch.dict(os.environ, {'OPENAI_API_KEY': 'private-selection-credential'}):
+            result = bridge.ask_codex('hello', model='private-selection-credential')
+        self.assertEqual(result['error']['code'], 'credential_in_prompt')
+        self.consult.assert_not_called()
+        self.assertEqual(list(self.data.glob('*.json')), [])
+        with bridge.connect() as con:
+            self.assertEqual(con.execute('SELECT COUNT(*) FROM events').fetchone()[0], 0)
+            self.assertEqual(con.execute('SELECT COUNT(*) FROM threads').fetchone()[0], 0)
+
+    def test_mcp_timeout_validation_rejects_coercion(self):
+        for value in (True, '900', 0, 1801, float('nan')):
+            with self.assertRaises(Exception):
+                asyncio.run(bridge.mcp.call_tool('ask_codex', {'question': 'hello', 'timeout_seconds': value}))
+        self.consult.assert_not_called()
+
     def test_mode_validation_no_child(self):
         for kwargs in ({'mode': 'open'}, {'mode': 'critique', 'other_answer': 'answer'},
                        {'mode': 'independent', 'thread_id': 'a'*32}, {'mode': 'independent', 'other_answer': 'answer'},
@@ -409,7 +578,8 @@ class BridgeTests(unittest.TestCase):
         response.model_dump.return_value = {'model': 'actual-claude'}
         bridge.client.messages.create.return_value = response
         a = bridge.ask_claude('continue', mode='open', thread_id='a'*32)
-        b = bridge.ask_claude('new question')
+        with patch.dict(os.environ, {'CODEX_TIMEOUT_SECONDS': 'invalid'}):
+            b = bridge.ask_claude('new question')
         self.assertEqual(a['text'], 'Claude answer')
         self.assertEqual(b['status'], 'ok')
         self.assertEqual(bridge.client.messages.create.call_args.kwargs['max_tokens'], bridge.MAX_TOKENS)

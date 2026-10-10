@@ -16,6 +16,8 @@ TERMINATE_GRACE_SECONDS = 2
 REAP_GRACE_SECONDS = 2
 CLEANUP_SECONDS = TERMINATE_GRACE_SECONDS + REAP_GRACE_SECONDS
 MCP_RESPONSE_MARGIN_SECONDS = 6
+MAX_TIMEOUT_SECONDS = 1800
+TASK_DEFAULTS = {'question': 120, 'code_generation': 900}
 DISABLED_FEATURES = (
     'plugins', 'remote_plugin', 'apps', 'hooks', 'shell_tool', 'unified_exec',
     'multi_agent', 'skill_mcp_dependency_install', 'code_mode_host', 'daemon_auto_start',
@@ -41,18 +43,28 @@ def executable():
     return str(Path(found).resolve())
 
 
-def timeout_seconds():
+def timeout_seconds(value=None, task='question'):
+    if not isinstance(task, str) or task not in TASK_DEFAULTS:
+        raise CodexFailure('invalid_task', 'task must be question or code_generation; project access is not supported.')
+    if value is None:
+        value = TASK_DEFAULTS[task]
+        if task == 'question' and 'CODEX_TIMEOUT_SECONDS' in os.environ:
+            try:
+                value = float(os.environ['CODEX_TIMEOUT_SECONDS'])
+            except ValueError:
+                raise CodexFailure('invalid_timeout', 'CODEX_TIMEOUT_SECONDS must be a finite positive number at most 1800.') from None
     try:
-        value = float(os.environ.get('CODEX_TIMEOUT_SECONDS', '120'))
-        if not math.isfinite(value) or value <= 0:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError()
+        if not math.isfinite(value) or not 0 < value <= MAX_TIMEOUT_SECONDS:
             raise ValueError()
         return value
-    except ValueError:
-        raise CodexFailure('invalid_timeout', 'CODEX_TIMEOUT_SECONDS must be a finite positive number.') from None
+    except (ValueError, OverflowError):
+        raise CodexFailure('invalid_timeout', 'timeout_seconds must be a finite positive number at most 1800.') from None
 
 
-def consultation_deadline():
-    return time.monotonic() + timeout_seconds()
+def consultation_deadline(value=None, task='question'):
+    return time.monotonic() + timeout_seconds(value, task)
 
 
 def remaining_seconds(deadline):
@@ -63,7 +75,56 @@ def remaining_seconds(deadline):
 
 
 def mcp_timeout_seconds():
-    return math.ceil(timeout_seconds() + CLEANUP_SECONDS + MCP_RESPONSE_MARGIN_SECONDS)
+    # Strictly exceed the largest permitted deadline, cleanup and response margin.
+    return MAX_TIMEOUT_SECONDS + CLEANUP_SECONDS + MCP_RESPONSE_MARGIN_SECONDS + 1
+
+
+def validate_options(task='question', model=None, reasoning_effort=None, timeout=None):
+    seconds = timeout_seconds(timeout, task)
+    for value, label in ((model, 'model'), (reasoning_effort, 'reasoning_effort')):
+        if value is not None and (not isinstance(value, str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]{0,127}', value)):
+            raise CodexFailure('invalid_selection', label + ' must be a nonempty model catalog identifier.')
+    if reasoning_effort is not None and model is None:
+        raise CodexFailure('model_required', 'Specify model when setting reasoning_effort so the combination can be verified.')
+    return {'task': task, 'requested_model': model,
+            'requested_reasoning_effort': reasoning_effort, 'timeout_seconds': seconds}
+
+
+def discover_capabilities(*, deadline, binary=None):
+    """Read this executable's bundled catalog offline; never use auth or inference."""
+    binary = binary or executable()
+    with tempfile.TemporaryDirectory(prefix='model-bridge-capabilities-') as root:
+        home, work = Path(root) / 'home', Path(root) / 'work'
+        home.mkdir(mode=0o700)
+        work.mkdir(mode=0o700)
+        code, out, _ = run_process(
+            [binary, '--no-daemon', *config_arguments(), 'debug', 'models', '--bundled'],
+            env=child_environment(home), cwd=work, deadline=deadline)
+    try:
+        if code:
+            raise ValueError()
+        models = json.loads(out)['models']
+        if not isinstance(models, list) or not models:
+            raise ValueError()
+        catalog = {}
+        for entry in models:
+            slug = entry['slug']
+            efforts = [level['effort'] for level in entry['supported_reasoning_levels']]
+            if (not isinstance(slug, str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]{0,127}', slug)
+                    or slug in catalog or not efforts
+                    or any(not isinstance(effort, str) or not re.fullmatch(r'[A-Za-z0-9_-]+', effort) for effort in efforts)):
+                raise ValueError()
+            catalog[slug] = {'reasoning_efforts': efforts, 'tool_mode': entry.get('tool_mode')}
+        return catalog
+    except (ValueError, KeyError, TypeError):
+        raise CodexFailure('capabilities_unavailable', 'Installed CLI did not supply a valid bundled model catalog; no substitution or model request was made.') from None
+
+
+def validate_selection(catalog, model, reasoning_effort):
+    if model not in catalog:
+        raise CodexFailure('unsupported_model', 'Requested model is absent from the installed CLI catalog; no substitution was made.')
+    if reasoning_effort is not None and reasoning_effort not in catalog[model]['reasoning_efforts']:
+        raise CodexFailure('unsupported_reasoning_effort', 'Requested effort is not supported for this model in the installed CLI catalog; no substitution was made.')
 
 
 def subscription_auth():
@@ -214,6 +275,7 @@ def run_process(argv, *, env, cwd, deadline, prompt=None):
 
 def parse_events(stdout, returncode, secrets):
     events, answers, final_answers, usage, model, stop_reason = [], [], [], None, None, None
+    warnings = []
     completed, failure = False, None
     for line in stdout.splitlines():
         if not line.strip():
@@ -236,6 +298,8 @@ def parse_events(stdout, returncode, secrets):
                     final_answers.append(item['text'])
                 elif item.get('phase') is None:
                     answers.append(item['text'])
+            elif item.get('type') == 'error':
+                warnings.append(item)
         if kind == 'turn.completed':
             completed = True
             usage = entry.get('usage')
@@ -247,7 +311,8 @@ def parse_events(stdout, returncode, secrets):
             failure = entry
     answer = (final_answers or answers or [None])[-1]
     result = {'status': 'ok', 'text': answer, 'model': model,
-              'usage': usage, 'stop_reason': stop_reason, 'events': events, 'exit_code': returncode}
+              'usage': usage, 'stop_reason': stop_reason, 'events': events, 'exit_code': returncode,
+              'warnings': warnings}
     if returncode != 0 or failure or not completed or answer is None:
         result.update(status='error', error={'code': 'cli_failed' if returncode or failure else 'incomplete_response',
                       'message': 'Codex consultation failed.' if returncode or failure else 'Codex did not emit a completed answer.',
@@ -255,18 +320,27 @@ def parse_events(stdout, returncode, secrets):
     return result
 
 
-def consult(prompt, extra_secrets=(), *, deadline=None):
+def consult(prompt, extra_secrets=(), *, deadline=None, task='question', model=None,
+            reasoning_effort=None, timeout_seconds=None):
     if os.environ.get(CHILD_MARKER):
         return {'status': 'error', 'error': {'code': 'recursive_call', 'message': 'Bridge calls are disabled in Codex child runs.'}}
+    requested = {}
+    secrets = secret_values({}) + list(extra_secrets)
     try:
+        requested = validate_options(task, model, reasoning_effort, timeout_seconds)
         if deadline is None:
-            deadline = consultation_deadline()
+            deadline = consultation_deadline(requested['timeout_seconds'], task)
         remaining_seconds(deadline)
-        binary, original = executable(), subscription_auth()
+        binary = executable()
+        original = subscription_auth()
         auth = cached_subscription_auth(original)
-        secrets = secret_values(original) + secret_values(auth) + list(extra_secrets)
-        if any(secret and secret in prompt for secret in secrets):
+        secrets += secret_values(original) + secret_values(auth)
+        supplied = prompt + '\n' + (model or '') + '\n' + (reasoning_effort or '')
+        if redact(supplied, secrets) != supplied:
             raise CodexFailure('credential_in_prompt', 'Prompt contains a credential; remove it before consulting Codex.')
+        if model is not None:
+            catalog = discover_capabilities(deadline=deadline, binary=binary)
+            validate_selection(catalog, model, reasoning_effort)
         with tempfile.TemporaryDirectory(prefix='model-bridge-codex-') as root:
             home, work = Path(root) / 'home', Path(root) / 'work'
             home.mkdir(mode=0o700)
@@ -288,17 +362,22 @@ def consult(prompt, extra_secrets=(), *, deadline=None):
                         raise ValueError()
                 except ValueError:
                     raise CodexFailure('mcp_isolation_failed', 'Cannot confirm an empty MCP server configuration; child run blocked.') from None
-                argv = [binary, '--no-daemon', *config_arguments(), 'exec', '--strict-config',
+                selection_args = []
+                if model is not None:
+                    selection_args += ['--model', model]
+                if reasoning_effort is not None:
+                    selection_args += ['-c', 'model_reasoning_effort=' + json.dumps(reasoning_effort)]
+                argv = [binary, '--no-daemon', *config_arguments(), 'exec', *selection_args, '--strict-config',
                         '--ignore-user-config', '--ignore-rules', '--sandbox', 'read-only',
                         '--ephemeral', '--skip-git-repo-check', '--json', '--color', 'never', '-']
                 code, out, _ = run_process(argv, env=env, cwd=work, deadline=deadline, prompt=prompt)
                 # Do not retain stderr: it is unstructured and can contain sensitive data.
                 result = parse_events(out, code, secrets + secret_values(json.loads(auth_path.read_text(encoding='utf-8'))))
                 remaining_seconds(deadline)
-                return result
+                return redact({**result, **requested}, secrets)
             finally:
                 persist_auth_refresh(home, original)
     except CodexFailure as exc:
-        return {'status': 'error', 'error': exc.error}
+        return redact({'status': 'error', 'error': exc.error, **requested}, secrets)
     except (OSError, ValueError):
-        return {'status': 'error', 'error': {'code': 'local_setup_failed', 'message': 'Unable to prepare isolated Codex consultation.'}}
+        return redact({'status': 'error', 'error': {'code': 'local_setup_failed', 'message': 'Unable to prepare isolated Codex consultation.'}, **requested}, secrets)
