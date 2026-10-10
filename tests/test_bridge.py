@@ -12,6 +12,7 @@ from unittest.mock import Mock, patch
 
 import claude_bridge as bridge
 import codex_runner as runner
+import configure_mcp_timeout as client_config
 
 
 def jsonl(*events):
@@ -33,6 +34,7 @@ class RunnerTests(unittest.TestCase):
         (self.home / 'auth.json').write_text(json.dumps({'auth_mode': 'chatgpt', 'OPENAI_API_KEY': None,
             'tokens': {'access_token': 'private-access-credential', 'refresh_token': 'private-refresh-credential'}}))
         self.env = patch.dict(os.environ, {'CODEX_HOME': str(self.home), 'CODEX_BIN': '/mock/codex',
+            'BRIDGE_CODEX_AUTH_CACHE': str(self.home / 'cache.json'),
             'OPENAI_API_KEY': 'private-api-credential', 'CODEX_API_KEY': 'other-api-credential',
             'OPENAI_BASE_URL': 'https://untrusted.invalid', 'MODEL_BRIDGE_CHILD': ''}, clear=True)
         self.env.start()
@@ -75,7 +77,10 @@ class RunnerTests(unittest.TestCase):
             self.assertIn(flag, argv)
         self.assertEqual(argv[argv.index('--sandbox')+1], 'read-only')
         self.assertNotIn('user prompt with $(shell syntax)', argv)
-        processes[-1].communicate.assert_called_once_with(input='user prompt with $(shell syntax)', timeout=120)
+        processes[-1].communicate.assert_called_once()
+        self.assertEqual(processes[-1].communicate.call_args.kwargs['input'], 'user prompt with $(shell syntax)')
+        self.assertGreater(processes[-1].communicate.call_args.kwargs['timeout'], 0)
+        self.assertLessEqual(processes[-1].communicate.call_args.kwargs['timeout'], 120)
         for feature in runner.DISABLED_FEATURES:
             self.assertIn('features.'+feature+'=false', argv)
         self.assertIn('mcp_servers={}', argv)
@@ -173,19 +178,130 @@ class RunnerTests(unittest.TestCase):
             spawn.assert_not_called()
         self.assertFalse(runner.prompt_is_safe('private-refresh-credential'))
 
-    def test_refresh_saved_privately_and_concurrent_login_preserved(self):
+    def test_refresh_cached_privately_without_writing_source_login(self):
         original = runner.subscription_auth()
         with tempfile.TemporaryDirectory() as temp:
             home = Path(temp)
             refreshed = {**original, 'tokens': {'access_token': 'new-private-token'}, 'last_refresh': 'now'}
             (home / 'auth.json').write_text(json.dumps(refreshed))
             runner.persist_auth_refresh(home, original)
-            self.assertEqual(runner.subscription_auth()['tokens'], refreshed['tokens'])
-            self.assertEqual((self.home / 'auth.json').stat().st_mode & 0o777, 0o600)
+            self.assertEqual(runner.subscription_auth(), original)
+            self.assertEqual(runner.cached_subscription_auth(original)['tokens'], refreshed['tokens'])
+            self.assertEqual(runner.auth_cache_path().stat().st_mode & 0o777, 0o600)
             concurrent = {'auth_mode': 'chatgpt', 'tokens': {'access_token': 'concurrent-login'}}
             (self.home / 'auth.json').write_text(json.dumps(concurrent))
             runner.persist_auth_refresh(home, original)
             self.assertEqual(runner.subscription_auth(), concurrent)
+            self.assertEqual(runner.cached_subscription_auth(concurrent), concurrent)
+
+    def test_login_changes_at_replace_boundary_are_never_overwritten(self):
+        original = runner.subscription_auth()
+        concurrent = {'auth_mode': 'chatgpt', 'tokens': {'access_token': 'concurrent-login'}}
+        replace = os.replace
+        with tempfile.TemporaryDirectory() as temp:
+            home = Path(temp)
+            (home / 'auth.json').write_text(json.dumps({**original, 'tokens': {'access_token': 'refreshed-token'}}))
+            def change_login_then_replace(src, dst):
+                # Reproduce the old check-to-replace race at its final write boundary.
+                (self.home / 'auth.json').write_text(json.dumps(concurrent))
+                self.assertEqual(dst, runner.auth_cache_path())
+                replace(src, dst)
+            with patch.object(runner.os, 'replace', side_effect=change_login_then_replace):
+                runner.persist_auth_refresh(home, original)
+        self.assertEqual(runner.subscription_auth(), concurrent)
+        self.assertEqual(runner.cached_subscription_auth(concurrent), concurrent)
+
+    def test_cache_cannot_replace_source_auth_even_through_symlink(self):
+        original = (self.home / 'auth.json').read_bytes()
+        link = self.home / 'auth-link.json'
+        link.symlink_to(self.home / 'auth.json')
+        for target in (self.home / 'auth.json', link):
+            with patch.dict(os.environ, {'BRIDGE_CODEX_AUTH_CACHE': str(target)}), patch.object(runner.subprocess, 'Popen') as spawn:
+                result = runner.consult('hello')
+            self.assertEqual(result['error']['code'], 'invalid_auth_cache')
+            spawn.assert_not_called()
+            self.assertEqual((self.home / 'auth.json').read_bytes(), original)
+
+    def test_consultation_uses_cached_refresh_and_redacts_it(self):
+        original = runner.subscription_auth()
+        cache = {'source_fingerprint': runner.auth_fingerprint(original), 'auth':
+                 {**original, 'tokens': {'access_token': 'cached-private-token'}}}
+        runner.auth_cache_path().write_text(json.dumps(cache))
+        processes = [self.process('Logged in using ChatGPT'), self.process('[]'),
+                     self.process(SUCCESS.replace('Bridge confirmed.', 'cached-private-token'))]
+        def spawn(argv, **kw):
+            copied = json.loads((Path(kw['env']['CODEX_HOME']) / 'auth.json').read_text())
+            self.assertEqual(copied['tokens']['access_token'], 'cached-private-token')
+            return processes.pop(0)
+        with patch.object(runner.subprocess, 'Popen', side_effect=spawn):
+            result = runner.consult('safe prompt')
+        self.assertEqual(result['text'], '[REDACTED]')
+        self.assertNotIn('cached-private-token', json.dumps(result))
+        self.assertFalse(runner.prompt_is_safe('cached-private-token'))
+        self.assertEqual(runner.subscription_auth(), original)
+
+    def test_one_deadline_reduces_each_stage_budget(self):
+        clock = [100.0]
+        processes = [self.process('Logged in using ChatGPT'), self.process('[]'), self.process(SUCCESS)]
+        for proc, output, duration in zip(processes, ['Logged in using ChatGPT', '[]', SUCCESS], [3, 4, 2]):
+            def communicate(output=output, duration=duration, **kw):
+                clock[0] += duration
+                return output, ''
+            proc.communicate.side_effect = communicate
+        with patch.dict(os.environ, {'CODEX_TIMEOUT_SECONDS': '10'}), patch.object(runner.time, 'monotonic', side_effect=lambda: clock[0]), patch.object(runner.subprocess, 'Popen', side_effect=processes):
+            result = runner.consult('hello')
+        self.assertEqual(result['status'], 'ok')
+        self.assertEqual([p.communicate.call_args.kwargs['timeout'] for p in processes], [10, 7, 3])
+
+    def test_preflights_can_exhaust_overall_deadline(self):
+        clock = [100.0]
+        login, mcp = self.process(''), self.process('[]')
+        def communicate(**kw):
+            clock[0] += 7
+            return 'Logged in using ChatGPT', ''
+        login.communicate.side_effect = communicate
+        def mcp_communicate(**kw):
+            clock[0] += 4
+            return '[]', ''
+        mcp.communicate.side_effect = mcp_communicate
+        with patch.dict(os.environ, {'CODEX_TIMEOUT_SECONDS': '10'}), patch.object(runner.time, 'monotonic', side_effect=lambda: clock[0]), patch.object(runner.subprocess, 'Popen', side_effect=[login, mcp]) as spawn, patch.object(runner.os, 'killpg') as kill:
+            result = runner.consult('hello')
+        self.assertEqual(result['error']['code'], 'timeout')
+        self.assertEqual(spawn.call_count, 2)  # Never starts exec with a new timeout.
+        self.assertEqual(mcp.communicate.call_args_list[0].kwargs['timeout'], 3)
+        self.assertEqual(kill.call_count, 2)
+
+    def test_expired_deadline_does_not_spawn(self):
+        with patch.object(runner.time, 'monotonic', return_value=100), patch.object(runner.subprocess, 'Popen') as spawn:
+            with self.assertRaises(runner.CodexFailure) as failure:
+                runner.run_process(['codex'], env={}, cwd=self.home, deadline=99)
+        self.assertEqual(failure.exception.error['code'], 'timeout')
+        spawn.assert_not_called()
+
+    def test_cleanup_has_separate_bounded_budget(self):
+        proc = self.process('')
+        proc.communicate.side_effect = [subprocess.TimeoutExpired('codex', 1), subprocess.TimeoutExpired('codex', 2), subprocess.TimeoutExpired('codex', 2)]
+        with patch.object(runner.time, 'monotonic', return_value=100), patch.object(runner.subprocess, 'Popen', return_value=proc), patch.object(runner.os, 'killpg'):
+            with self.assertRaises(runner.CodexFailure) as failure:
+                runner.run_process(['codex'], env={}, cwd=self.home, deadline=101)
+        self.assertEqual(failure.exception.error['code'], 'cleanup_timeout')
+        self.assertEqual([c.kwargs['timeout'] for c in proc.communicate.call_args_list], [1, 2, 2])
+        proc.stdout.close.assert_called_once()
+
+    def test_mcp_timeout_alignment_preserves_other_configuration(self):
+        path = self.home / 'config.toml'
+        text = '[mcp_servers.other]\ntool_timeout_sec = 9\n[mcp_servers.model-bridge]\nurl = "local-url"\nhttp_headers_helper = "private-helper"\n[features]\nplugins = true\n'
+        path.write_text(text)
+        with patch.dict(os.environ, {'CODEX_TIMEOUT_SECONDS': '120'}):
+            self.assertEqual(client_config.configure(path), 130)
+        updated = path.read_text()
+        self.assertIn('[mcp_servers.model-bridge]\ntool_timeout_sec = 130\n', updated)
+        self.assertEqual(updated.replace('tool_timeout_sec = 130\n', ''), text)
+        self.assertEqual(client_config.aligned_config(updated, 130), updated)
+        with patch.dict(os.environ, {'CODEX_TIMEOUT_SECONDS': '7.1'}):
+            self.assertEqual(client_config.configure(path), 18)
+        self.assertIn('tool_timeout_sec = 9', path.read_text())
+        with self.assertRaises(ValueError): client_config.aligned_config('[features]\n', 130)
 
 
 class BridgeTests(unittest.TestCase):
@@ -236,13 +352,28 @@ class BridgeTests(unittest.TestCase):
             self.assertEqual(bridge.load_thread(con, response['thread_id'], 'codex'), [])
 
     def test_request_persisted_before_run(self):
-        def consult(*args):
+        def consult(*args, **kwargs):
             files = list(self.data.glob('*.json'))
             self.assertEqual(len(files), 1)
             self.assertEqual(json.loads(files[0].read_text())['events'][0]['kind'], 'request')
             return self.result
         self.consult.side_effect = consult
         bridge.ask_codex('hello')
+
+    def test_deadline_includes_bridge_lock_wait(self):
+        lock = Mock()
+        lock.acquire.return_value = False
+        with patch.object(bridge, 'LOCK', lock), patch.object(runner.time, 'monotonic', return_value=100):
+            result = bridge.ask_codex('hello')
+        self.assertEqual(result['error']['code'], 'timeout')
+        lock.acquire.assert_called_once_with(timeout=120)
+        lock.release.assert_not_called()
+        self.consult.assert_not_called()
+
+    def test_bridge_passes_original_deadline_to_runner(self):
+        with patch.object(runner.time, 'monotonic', return_value=100):
+            bridge.ask_codex('hello')
+        self.assertEqual(self.consult.call_args.kwargs['deadline'], 220)
 
     def test_mode_validation_no_child(self):
         for kwargs in ({'mode': 'open'}, {'mode': 'critique', 'other_answer': 'answer'},

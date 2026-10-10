@@ -11,6 +11,7 @@ OpenAI API key or API-key billing. ChatGPT plan usage limits still apply.
 From any WSL terminal, including one outside VS Code:
 
 ```bash
+CLAUDE_MODEL='claude-haiku-5-5' BRIDGE_MAX_TOKENS='4096' CODEX_TIMEOUT_SECONDS='120' \
 CODEX_BIN='/home/jachee/.vscode-server/extensions/openai.chatgpt-26.1007.21434-linux-x64/bin/linux-x86_64/codex' \
   /home/jachee/projects/acheedev/model-bridge/.venv/bin/python \
   /home/jachee/projects/acheedev/model-bridge/claude_bridge.py
@@ -89,7 +90,20 @@ VS Code state, and bridge credentials are not inherited. Known credentials are
 rejected before request logging and redacted from returned events. Raw stderr is
 never returned or persisted. Temporary credential copies are private and removed
 on completion. CLI token refreshes are saved atomically with private file permissions
-when the source login has not changed; a concurrent login is never replaced. Do not place arbitrary credentials in consultation text.
+in a **separate bridge-owned cache**, defaulting to
+`~/.config/model-bridge/codex-auth-cache.json` (override with
+`BRIDGE_CODEX_AUTH_CACHE`). The bridge never writes the source Codex `auth.json`;
+it does not attempt a check-then-replace against that shared file. Cache updates
+are atomic to avoid partial files, not to provide compare-and-swap against
+another client's login. Run only one bridge process and reserve its cache for
+that process. The cache must not point to the source authentication file.
+
+Cached refreshes are reused only when the source login's fingerprint matches
+their original seed. If another CLI changes the source login during a consultation,
+that consultation may finish with the older login; the next consultation uses the
+new source login. Other Codex clients do not share the bridge's cache and may need
+to sign in again if refresh-token rotation invalidates their saved tokens. Do not
+place arbitrary credentials in consultation text.
 
 `model`, `usage`, and `stop_reason` come only from JSONL events. If the CLI does
 not emit a field, the bridge returns `null`; it does not infer a model identifier
@@ -98,9 +112,28 @@ while other events remain in the transcript. Nonzero exits, JSONL error events,
 invalid output, missing completed answers, setup failures, and timeouts return
 structured errors. No consultation is retried automatically.
 
-`CODEX_TIMEOUT_SECONDS` defaults to `120` and limits each child process, including
-local preflights. On timeout the bridge sends SIGTERM and then SIGKILL to the
-child process group, reaps the process, and returns a timeout failure.
+`CODEX_TIMEOUT_SECONDS` defaults to `120` and sets **one overall monotonic
+consultation deadline**, including the bridge lock wait, setup, both local
+preflights, and `codex exec`. Each subprocess receives only the remaining budget;
+an expired deadline prevents the next stage from starting. On timeout the bridge
+sends SIGTERM and then SIGKILL to the child process group. Cleanup has a separate
+budget of up to 4 seconds (2 seconds to terminate and 2 seconds to reap). Cleanup
+that exceeds its budget returns a structured `cleanup_timeout` failure.
+
+The MCP client must wait long enough to receive the structured result. Set
+`tool_timeout_sec` under `[mcp_servers.model-bridge]` in `~/.codex/config.toml`
+to `ceil(CODEX_TIMEOUT_SECONDS + 4 + 6)`: the consultation deadline, cleanup
+budget, and 6-second allowance for response/transcript work. For the startup
+example above, that is **130 seconds**. Other MCP clients need the same timeout.
+Whenever changing the bridge's deadline, update the client with the same value:
+
+```bash
+CODEX_TIMEOUT_SECONDS='120' .venv/bin/python configure_mcp_timeout.py
+```
+
+This local helper updates only model-bridge's tool timeout and prints only the
+resulting value. Reload the MCP client after changing its configuration, and
+restart the bridge to apply startup environment changes.
 `BRIDGE_MAX_TOKENS` and `BRIDGE_MAX_CALLS` apply only to Claude. This CLI exposes no
 Codex output-token cap in `exec --help`, so neither variable is used as one.
 
@@ -122,7 +155,7 @@ Run the checks without live model requests:
 
 ```bash
 .venv/bin/python -m unittest discover -s tests -v
-.venv/bin/python -m compileall -q claude_bridge.py codex_runner.py bridge_ping.py tests
+.venv/bin/python -m compileall -q claude_bridge.py codex_runner.py configure_mcp_timeout.py bridge_ping.py tests
 git diff --check
 ```
 
