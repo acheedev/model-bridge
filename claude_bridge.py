@@ -5,7 +5,7 @@ Endpoint: http://127.0.0.1:8081/mcp
 Header: Authorization: Bearer <contents of ~/.config/model-bridge/bridge.token>
 Secrets stay in ~/.config/model-bridge; transcripts in ~/model-bridge/transcripts.
 CLAUDE_MODEL defaults to claude-sonnet-5-5. Set it to claude-haiku-5-5 for tests.
-BRIDGE_MAX_TOKENS defaults to 1024; BRIDGE_MAX_CALLS defaults to 20 per process.
+BRIDGE_MAX_TOKENS defaults to 4096; BRIDGE_MAX_CALLS defaults to 20 per process.
 The call limit is a guardrail, not a dollar budget; restarting resets it.
 No automatic API retries. One server process only. Do not expose publicly.
 """
@@ -29,7 +29,7 @@ from mcp.types import ToolAnnotations
 CONFIG = Path.home() / '.config/model-bridge'
 DATA = Path(os.environ.get('BRIDGE_DATA_DIR', str(Path.home() / 'model-bridge/transcripts'))).expanduser()
 MODEL = os.environ.get('CLAUDE_MODEL', 'claude-sonnet-5-5')
-MAX_TOKENS = int(os.environ.get('BRIDGE_MAX_TOKENS', '1024'))
+MAX_TOKENS = int(os.environ.get('BRIDGE_MAX_TOKENS', '4096'))
 MAX_CALLS = int(os.environ.get('BRIDGE_MAX_CALLS', '20'))
 BASE = ('You are Claude, consulted by ChatGPT on behalf of the user. '
         'You only know the supplied messages. Think independently and disagree when warranted. '

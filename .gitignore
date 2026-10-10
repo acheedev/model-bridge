@@ -1,0 +1,78 @@
+# ---- OS cruft ----
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---- Env & secrets ----
+.env
+.env.*
+!.env.example
+.envrc
+.direnv/
+*.pem
+*.key
+
+# ---- local user data ----
+run.sh
+rerund.sh
+sql/
+etl/run*
+data/
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*$py.class
+.python-version
+.venv/
+venv/
+env/
+pip-wheel-metadata/
+*.egg-info/
+dist/
+build/
+
+# Type checkers / tooling
+.mypy_cache/
+.pytype/
+.pyre/
+.ruff_cache/
+
+# Testing & coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Notebooks
+.ipynb_checkpoints/
+
+# Logs & temp
+*.log
+logs/
+tmp/
+*.sqlite3
+*.sqlite
+
+# ---- Docker / Postgres ----
+# Named volume is used, but ignore local mounts if you switch to bind
+pgdata/
+docker-compose.override.yml
+
+# psql convenience files
+.pgpass
+.psql_history
+
+# ---- Editors / IDEs ----
+.vscode/
+.idea/
+*.iml
+
+# ---- Misc editor backups ----
+*.swp
+*.swo
+*~
+*.sql~
+
+# ---- Project ignore ----
+transcripts/
