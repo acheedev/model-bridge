@@ -31,9 +31,12 @@ from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 from pydantic import Field
 import codex_runner
+from bridge_paths import approved_path, transcript_directory
+from bridge_runtime import Runtime, register_tools
+from file_transfers import REQUEST_BYTES
 
-CONFIG = Path.home() / '.codex/model-bridge'
-DATA = Path(os.environ.get('BRIDGE_DATA_DIR', str(Path(__file__).resolve().parent / 'transcripts'))).expanduser()
+CONFIG = approved_path(Path.home() / '.codex/model-bridge')
+DATA = transcript_directory()
 MODEL = os.environ.get('CLAUDE_MODEL', 'claude-sonnet-5-5')
 MAX_TOKENS = int(os.environ.get('BRIDGE_MAX_TOKENS', '4096'))
 MAX_CALLS = int(os.environ.get('BRIDGE_MAX_CALLS', '20'))
@@ -52,6 +55,7 @@ calls = 0
 client = None
 api_key = ''
 bridge_token = ''
+project_runtime = None
 
 
 def now():
@@ -59,7 +63,7 @@ def now():
 
 
 def connect():
-    con = sqlite3.connect(DATA / 'threads.sqlite3')
+    con = sqlite3.connect(approved_path(DATA / 'threads.sqlite3'))
     con.execute('CREATE TABLE IF NOT EXISTS threads (id TEXT PRIMARY KEY, messages TEXT NOT NULL)')
     if 'provider' not in {row[1] for row in con.execute('PRAGMA table_info(threads)')}:
         con.execute("ALTER TABLE threads ADD COLUMN provider TEXT NOT NULL DEFAULT 'claude'")
@@ -118,9 +122,13 @@ def create_thread(con, provider, title):
 
 
 def atomic_text(target, content):
-    temporary = target.with_suffix(target.suffix + '.tmp')
-    temporary.write_text(content, encoding='utf-8')
-    os.replace(temporary, target)
+    target = approved_path(target)
+    temporary = approved_path(target.with_suffix(target.suffix + '.tmp'))
+    try:
+        temporary.write_text(content, encoding='utf-8')
+        os.replace(temporary, target)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def export_index(con):
@@ -182,6 +190,26 @@ def check_text(*values):
 
 mcp = FastMCP('model-bridge', host='127.0.0.1', port=8081,
               stateless_http=True, json_response=True)
+
+
+def get_project_runtime():
+    if project_runtime is None:
+        raise ValueError('Project runtime is not initialized.')
+    return project_runtime
+
+
+def runtime_secrets():
+    values = [api_key, bridge_token]
+    try:
+        auth = codex_runner.subscription_auth()
+        values += codex_runner.secret_values(auth)
+        values += codex_runner.secret_values(codex_runner.cached_subscription_auth(auth))
+    except codex_runner.CodexFailure:
+        pass
+    return [value for value in values if value]
+
+
+register_tools(mcp, get_project_runtime)
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False))
@@ -367,34 +395,62 @@ class BearerGate:
                                         (b'www-authenticate', b'Bearer')]})
                 await send({'type': 'http.response.body', 'body': b'{"error":"unauthorized"}'})
                 return
+            if scope.get('method') == 'POST':
+                body = bytearray()
+                while True:
+                    message = await receive()
+                    if message['type'] == 'http.disconnect':
+                        return
+                    chunk = message.get('body', b'')
+                    if len(body) + len(chunk) > REQUEST_BYTES:
+                        await send({'type': 'http.response.start', 'status': 413, 'headers': []})
+                        await send({'type': 'http.response.body', 'body': b'{"error":"encoded_request_too_large"}'})
+                        return
+                    body.extend(chunk)
+                    if not message.get('more_body', False):
+                        break
+                upstream = receive
+                consumed = False
+                async def buffered_receive():
+                    nonlocal consumed
+                    if not consumed:
+                        consumed = True
+                        return {'type': 'http.request', 'body': bytes(body), 'more_body': False}
+                    return await upstream()
+                receive = buffered_receive
         await self.app(scope, receive, send)
 
 
-def initialize():
-    global client, api_key, bridge_token
+def initialize(project_tools=False):
+    global client, api_key, bridge_token, project_runtime
     os.umask(0o077)
     if not 1 <= MAX_TOKENS <= 4096 or MAX_CALLS < 1:
         raise ValueError('Invalid token or call limit.')
     if os.environ.get(codex_runner.CHILD_MARKER):
         raise RuntimeError('Bridge startup is disabled in Codex child runs.')
-    key_path = CONFIG / 'anthropic.key'
+    key_path = approved_path(CONFIG / 'anthropic.key')
     api_key = key_path.read_text().strip() if key_path.exists() else ''
-    bridge_token = (CONFIG / 'bridge.token').read_text().strip()
+    bridge_token = approved_path(CONFIG / 'bridge.token').read_text().strip()
     if len(bridge_token) < 32:
         raise ValueError('Invalid bridge token.')
-    DATA.mkdir(parents=True, exist_ok=True)
-    DATA.chmod(0o700)
+    data = approved_path(DATA)
+    data.mkdir(parents=True, exist_ok=True)
+    data.chmod(0o700)
     with LOCK, closing(connect()) as con:
         export_index(con)
     client = Anthropic(api_key=api_key, timeout=60.0, max_retries=0) if api_key else None
+    if project_tools:
+        project_runtime = Runtime(runtime_secrets)
     return BearerGate(mcp.streamable_http_app(), bridge_token)
 
 
 if __name__ == '__main__':
-    app = initialize()
+    app = initialize(project_tools=True)
     try:
         uvicorn.run(app, host='127.0.0.1', port=8081, workers=1, access_log=False)
     finally:
+        if project_runtime is not None:
+            project_runtime.close()
         if client is not None:
             client.close()
 

@@ -6,6 +6,29 @@ is not required. The existing Claude tool uses Anthropic API credits. The Codex
 tool uses the installed CLI and saved ChatGPT subscription login, without an
 OpenAI API key or API-key billing. ChatGPT plan usage limits still apply.
 
+Reusable byte-preserving file transfer and a separate authorized implementation
+worker are now available. See [MCP_PROJECT_WORK.md](MCP_PROJECT_WORK.md) for the
+seven new tools, exact schemas, limits, authorization, recovery behavior and
+Windows-client proof steps. Consultation isolation remains unchanged.
+
+## Project direction and roles
+
+Model Bridge supports a human-led council workflow. John Achee sets direction
+and execution authority; Mimi coordinates work, evaluates evidence, and presents
+recommendations; Ezra is the v1 code author and can also participate as a
+consultant; Claude and Gem are independent consultants. Consultation never
+authorizes implementation by itself. Project jobs require explicit assignment
+text, acceptance criteria, a known project ID, and authority flags.
+
+The approved direction is to move from dependable consultations to a controlled
+coding loop, durable background jobs, ChatGPT/iPhone access, Gemini integration,
+and council coordination. Those roadmap items are not all current capabilities.
+The current worker-transfer bootstrap was implemented before the planned
+baseline-closeout merge; baseline documentation, service/checkout reconciliation,
+and review/merge housekeeping remain pending. See [PROJECT_SPEC.md](PROJECT_SPEC.md)
+for the reconciled specification, observed implementation status, and open
+questions.
+
 ## Start with the currently installed CLI
 
 From any WSL terminal, including one outside VS Code:
@@ -19,6 +42,9 @@ CODEX_BIN='/home/jachee/.vscode-server/extensions/openai.chatgpt-26.1007.21434-l
 
 The endpoint is `http://127.0.0.1:8081/mcp`. Clients must send the bearer token
 stored in `~/.codex/model-bridge/bridge.token`. Do not print or commit that file.
+The local MCP authentication helper is
+`~/.codex/model-bridge/codex-http-headers.py`; it reads that token and emits the
+bearer header for the client. Capture its output privately when verifying it.
 Run only one bridge process at a time. Stop the existing bridge before starting
 this command; this change does not restart the running server.
 
@@ -62,10 +88,11 @@ still run, while `ask_claude` reports that it is not initialized. Python require
 and `task="code_generation"`. Code generation returns the completed answer as
 text; the bridge never executes that generated code or writes it to a project.
 Supply source snippets and requirements in `context`. Both tasks use the same
-empty temporary working directory under the project’s `tmp/`, ignored user config/rules, read-only sandbox,
-disabled tool integrations, and subscription authentication. There is no project
-path argument. Inspecting or editing project files requires the separate design
-below and is not enabled by choosing code generation.
+empty temporary working directory under the project’s `.tmp/`, ignored user
+config/rules, read-only sandbox, disabled tool integrations, and subscription
+authentication. There is no project path argument. Inspecting or editing project
+files requires the separate project-worker tools and is not enabled by choosing
+code generation.
 
 Example MCP arguments (illustrative; not a request made during validation):
 
@@ -135,7 +162,9 @@ responses, JSONL events, errors, and synthesis use the existing JSON/Markdown
 transcripts in `BRIDGE_DATA_DIR` (default `transcripts/` beside `claude_bridge.py`,
 independent of the working directory). In this checkout that is
 `/home/jachee/projects/acheedev/model-bridge/transcripts`. Set `BRIDGE_DATA_DIR`
-only when intentionally choosing another data location.
+only when intentionally choosing another data location. Transcript and auth-cache
+overrides must resolve under `/home/jachee/projects` or `/home/jachee/.codex`;
+paths outside those roots, including directory or file symlink escapes, are rejected.
 
 Both consultation tools accept an optional `title` (at most 200 characters).
 Use a short descriptive label, never credentials. Omitted or blank titles use
@@ -261,36 +290,28 @@ environment changes). This implementation does not restart the running bridge.
 `BRIDGE_MAX_TOKENS` and `BRIDGE_MAX_CALLS` apply only to Claude. This CLI exposes no
 Codex output-token cap in `exec --help`, so neither variable is used as one.
 
-## Proposed project access design (not implemented)
+## Project-worker scope
 
-Project inspection and editing should use a separate tool, not an extra
-privilege switch on `ask_codex`. Proposed interface: `consult_project` with an
-explicit allowlisted `project_id`, `operation="inspect"|"propose_patch"`, requested
-paths, question, model/effort and deadline. Resolve project IDs to canonical
-roots locally; reject traversal and symlink escapes, and scope each thread to
-its project. No arbitrary host paths or broad `--add-dir` grants.
+Project inspection and editing use separate worker-transfer tools, not an extra
+privilege switch on `ask_codex`. The current bootstrap accepts only
+`project_id: "model-bridge"` and exactly
+`{"edit":true,"test":true,"commit":false,"push":false}`. It can edit this
+checkout and run relevant validation under a sandboxed worker, but it cannot
+commit, push, restart services, access job state, or call the bridge from inside
+the child process. It is serialized, not a general multi-project scheduler.
 
-For inspection, a local broker should copy only approved files into a private
-read-only snapshot after excluding credentials, authentication/config directories,
-private keys, `.env` files, and unrelated data. Apply byte/file caps and record
-file hashes and provenance. A read-only sandbox alone is insufficient to confine
-reads to a project. The inference child should continue to receive an isolated
-auth home and environment with no bridge/project credentials in context or tools.
+Inbound transfers provide byte-preserving reference files. The supervisor mounts
+verified job inputs read-only under `.worker-inputs/`, records job state under a
+private Git-ignored store, and publishes sanitized outbound artifacts for MCP
+retrieval. `MCP_PROJECT_WORK.md` is the source for exact schemas, storage limits,
+credential exclusions, cancellation behavior, and known sandbox limits.
 
-For edits, generate a patch against that snapshot or a dedicated disposable
-worktree. Return the diff and validation evidence first. A separate apply step
-should require explicit write authorization, recheck original file hashes to
-detect concurrent edits, validate every patch path, and apply only within the
-approved root. Preserve existing dirty files and provide rollback artifacts.
-Running tests or generated code needs its own explicit execution policy, network
-restrictions and process cleanup; it should not happen as a side effect of patch
-generation. Retain one deadline, recursion guards, provider separation and audit
-records, with no automatic model retries, commits, pushes or installations.
-
-Before enabling project access, test denied paths, symlink/race escapes, secrets
-excluded from snapshots, concurrent changes, cancellation, patch failures and
-rollback. A verified narrow filesystem broker or OS read confinement is required;
-prompt instructions and switching to `workspace-write` are not sufficient.
+The earlier design requirement still applies to future broader project access:
+authorize narrow roots, exclude credentials, record provenance and hashes, detect
+concurrent edits, return reviewable diffs and validation evidence, and keep patch
+application, test execution, commits, pushes, installations, and service restarts
+behind explicit authority. Prompt instructions alone are not a filesystem
+security boundary.
 
 ## Validation
 
@@ -323,6 +344,8 @@ git diff --check
 Recheck CLI compatibility after upgrading or replacing the executable. Unsupported
 flags/configuration fail rather than removing sandbox or authentication guards.
 
-Consultation and capability-check temporary directories live in `tmp/` beside
+Consultation and capability-check temporary directories live in `.tmp/` beside
 `codex_runner.py`, are private, and are removed after each call. The child CLI
-also receives `TMPDIR` inside its private directory. `tmp/` is Git-ignored.
+also receives `TMPDIR` inside its private directory. Tests explicitly create
+their temporary fixtures under the same project `.tmp/`, independent of the
+caller’s `TMPDIR`. `.tmp/` is Git-ignored.

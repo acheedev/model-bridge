@@ -1,0 +1,21 @@
+[Unit]
+Description=Model Bridge MCP server
+After=network.target
+
+[Service]
+Type=simple
+User=jachee
+WorkingDirectory=/home/jachee/projects/acheedev/model-bridge
+Environment=CLAUDE_MODEL=claude-haiku-5-5
+Environment=BRIDGE_MAX_TOKENS=4096
+Environment=CODEX_TIMEOUT_SECONDS=120
+Environment=CODEX_BIN=/home/jachee/.vscode-server/extensions/openai.chatgpt-26.1007.21434-linux-x64/bin/linux-x86_64/codex
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/jachee/projects/acheedev/model-bridge/.venv/bin/python /home/jachee/projects/acheedev/model-bridge/claude_bridge.py
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=10
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

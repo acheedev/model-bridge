@@ -13,6 +13,11 @@ from unittest.mock import Mock, patch
 import claude_bridge as bridge
 import codex_runner as runner
 import configure_mcp_timeout as client_config
+import bridge_paths
+
+
+def temporary_test_directory():
+    return tempfile.TemporaryDirectory(prefix='bridge-test-', dir=runner.temporary_root())
 
 
 def jsonl(*events):
@@ -33,7 +38,7 @@ CATALOG = json.dumps({'models': [
 
 class RunnerTests(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp = temporary_test_directory()
         self.addCleanup(self.tmp.cleanup)
         self.home = Path(self.tmp.name)
         (self.home / 'auth.json').write_text(json.dumps({'auth_mode': 'chatgpt', 'OPENAI_API_KEY': None,
@@ -61,8 +66,8 @@ class RunnerTests(unittest.TestCase):
             self.assertFalse(kw['shell'])
             self.assertTrue(kw['start_new_session'])
             self.assertEqual(list(Path(kw['cwd']).iterdir()), [])
-            self.assertTrue(Path(kw['cwd']).resolve().is_relative_to(runner.PROJECT_ROOT / 'tmp'))
-            self.assertTrue(Path(kw['env']['TMPDIR']).resolve().is_relative_to(runner.PROJECT_ROOT / 'tmp'))
+            self.assertTrue(Path(kw['cwd']).resolve().is_relative_to(runner.PROJECT_ROOT / '.tmp'))
+            self.assertTrue(Path(kw['env']['TMPDIR']).resolve().is_relative_to(runner.PROJECT_ROOT / '.tmp'))
             self.assertNotEqual(kw['env']['CODEX_HOME'], str(self.home))
             auth = json.loads((Path(kw['env']['CODEX_HOME']) / 'auth.json').read_text())
             self.assertNotIn('OPENAI_API_KEY', auth)
@@ -297,7 +302,7 @@ class RunnerTests(unittest.TestCase):
 
     def test_refresh_cached_privately_without_writing_source_login(self):
         original = runner.subscription_auth()
-        with tempfile.TemporaryDirectory() as temp:
+        with temporary_test_directory() as temp:
             home = Path(temp)
             refreshed = {**original, 'tokens': {'access_token': 'new-private-token'}, 'last_refresh': 'now'}
             (home / 'auth.json').write_text(json.dumps(refreshed))
@@ -315,7 +320,7 @@ class RunnerTests(unittest.TestCase):
         original = runner.subscription_auth()
         concurrent = {'auth_mode': 'chatgpt', 'tokens': {'access_token': 'concurrent-login'}}
         replace = os.replace
-        with tempfile.TemporaryDirectory() as temp:
+        with temporary_test_directory() as temp:
             home = Path(temp)
             (home / 'auth.json').write_text(json.dumps({**original, 'tokens': {'access_token': 'refreshed-token'}}))
             def change_login_then_replace(src, dst):
@@ -422,9 +427,118 @@ class RunnerTests(unittest.TestCase):
         with self.assertRaises(ValueError): client_config.aligned_config('[features]\n', 130)
 
 
+class PathBoundaryTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = temporary_test_directory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+
+    def test_approved_overrides_are_resolved(self):
+        for value in (self.root / 'nested/../transcripts', Path('/home/jachee/.codex/model-bridge/test-data')):
+            with patch.dict(os.environ, {'BRIDGE_DATA_DIR': str(value), 'BRIDGE_CODEX_AUTH_CACHE': str(value / 'cache.json')}):
+                self.assertEqual(bridge_paths.transcript_directory(), value.resolve())
+                self.assertEqual(runner.auth_cache_path(), (value / 'cache.json').resolve())
+
+    def test_outside_overrides_fail_before_io_or_cli(self):
+        home = self.root / 'home'
+        home.mkdir()
+        (home / 'auth.json').write_text(json.dumps({'auth_mode': 'chatgpt', 'tokens': {'access_token': 'fixture-token'}}))
+        for value in ('/home/jachee/blocked-bridge-test', '/home/jachee/projects-escape/test', '/home/jachee/.codex-escape/test'):
+            with patch.dict(os.environ, {'BRIDGE_DATA_DIR': value}):
+                with self.assertRaises(ValueError): bridge_paths.transcript_directory()
+            with patch.dict(os.environ, {'BRIDGE_CODEX_AUTH_CACHE': value, 'CODEX_HOME': str(home), 'MODEL_BRIDGE_CHILD': ''}), patch.object(runner.subprocess, 'Popen') as spawn, patch.object(runner, 'executable', return_value='/mock/codex'):
+                with self.assertRaises(runner.CodexFailure): runner.cached_subscription_auth({})
+                result = runner.consult('fixture question')
+                self.assertEqual(result['error']['code'], 'invalid_auth_cache')
+                spawn.assert_not_called()
+
+    def test_directory_and_file_symlink_escapes_rejected(self):
+        directory = self.root / 'escape'
+        directory.symlink_to('/home/jachee', target_is_directory=True)
+        cache = self.root / 'cache.json'
+        cache.symlink_to('/home/jachee/blocked-bridge-cache.json')
+        for value in (directory / 'blocked-bridge-test', cache):
+            with patch.dict(os.environ, {'BRIDGE_DATA_DIR': str(value)}):
+                with self.assertRaises(ValueError): bridge_paths.transcript_directory()
+            with patch.dict(os.environ, {'BRIDGE_CODEX_AUTH_CACHE': str(value)}):
+                with self.assertRaises(runner.CodexFailure): runner.auth_cache_path()
+
+    def test_transcript_database_and_output_symlink_escapes_rejected(self):
+        database = self.root / 'threads.sqlite3'
+        database.symlink_to('/home/jachee/blocked-bridge-db.sqlite3')
+        with patch.object(bridge, 'DATA', self.root), patch.object(bridge.sqlite3, 'connect') as connect:
+            with self.assertRaises(ValueError): bridge.connect()
+            connect.assert_not_called()
+        output = self.root / 'test.md'
+        output.symlink_to('/home/jachee/blocked-bridge-output.md')
+        with self.assertRaises(ValueError): bridge.atomic_text(output, 'test')
+        output.unlink()
+        output.with_suffix('.md.tmp').symlink_to('/home/jachee/blocked-bridge-output.tmp')
+        with self.assertRaises(ValueError): bridge.atomic_text(output, 'test')
+        self.assertFalse(output.exists())
+
+    def test_atomic_export_failure_cleans_temp_and_preserves_original(self):
+        output = self.root / 'test.md'
+        output.write_text('original')
+        with patch.object(bridge.os, 'replace', side_effect=OSError('injected failure')):
+            with self.assertRaises(OSError): bridge.atomic_text(output, 'replacement')
+        self.assertEqual(output.read_text(), 'original')
+        self.assertFalse(output.with_suffix('.md.tmp').exists())
+
+    def test_capability_failure_cleans_project_temp(self):
+        work = []
+        def fail(*args, **kwargs):
+            work.append(kwargs['cwd'])
+            self.assertTrue(kwargs['cwd'].is_relative_to(runner.PROJECT_ROOT / '.tmp'))
+            raise runner.CodexFailure('timeout', 'injected failure')
+        with patch.object(runner, 'run_process', side_effect=fail):
+            with self.assertRaises(runner.CodexFailure): runner.discover_capabilities(deadline=1, binary='/mock/codex')
+        self.assertEqual(len(work), 1)
+        self.assertFalse(work[0].parent.exists())
+
+    def test_cache_permissions_and_failed_replace_cleanup(self):
+        home = self.root / 'home'
+        home.mkdir()
+        original = {'auth_mode': 'chatgpt', 'tokens': {'access_token': 'original'}}
+        (home / 'auth.json').write_text(json.dumps({'auth_mode': 'chatgpt', 'tokens': {'access_token': 'refreshed'}}))
+        folder = self.root / 'cache'
+        folder.mkdir(mode=0o755)
+        target = folder / 'auth.json'
+        with patch.dict(os.environ, {'BRIDGE_CODEX_AUTH_CACHE': str(target)}):
+            runner.persist_auth_refresh(home, original)
+            self.assertEqual(folder.stat().st_mode & 0o777, 0o700)
+            self.assertEqual(target.stat().st_mode & 0o777, 0o600)
+            saved = target.read_bytes()
+            with patch.object(runner.os, 'replace', side_effect=OSError('injected failure')):
+                with self.assertRaises(runner.CodexFailure): runner.persist_auth_refresh(home, original)
+            self.assertEqual(target.read_bytes(), saved)
+            self.assertEqual(list(folder.glob('.bridge-auth-*')), [])
+
+    def test_tmp_directory_symlink_escape_rejected(self):
+        project = self.root / 'project'
+        project.mkdir()
+        (project / '.tmp').symlink_to('/home/jachee', target_is_directory=True)
+        with patch.object(runner, 'PROJECT_ROOT', project):
+            with self.assertRaises(runner.CodexFailure): runner.temporary_root()
+
+    def test_consultation_failure_cleans_private_home_and_work(self):
+        home = self.root / 'home'
+        home.mkdir()
+        (home / 'auth.json').write_text(json.dumps({'auth_mode': 'chatgpt', 'tokens': {'access_token': 'fixture-token'}}))
+        work = []
+        def fail(*args, **kwargs):
+            work.append(kwargs['cwd'])
+            raise runner.CodexFailure('timeout', 'injected failure')
+        with patch.dict(os.environ, {'CODEX_HOME': str(home), 'BRIDGE_CODEX_AUTH_CACHE': str(self.root / 'cache.json'), 'MODEL_BRIDGE_CHILD': ''}), patch.object(runner, 'executable', return_value='/mock/codex'), patch.object(runner, 'run_process', side_effect=fail):
+            result = runner.consult('fixture question')
+        self.assertEqual(result['error']['code'], 'timeout')
+        self.assertEqual(len(work), 1)
+        self.assertFalse(work[0].parent.exists())
+
+
 class BridgeTests(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp = temporary_test_directory()
         self.addCleanup(self.tmp.cleanup)
         self.data = Path(self.tmp.name)
         for name, value in [('DATA', self.data), ('api_key', ''), ('bridge_token', ''), ('calls', 0), ('client', Mock())]:

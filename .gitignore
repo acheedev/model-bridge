@@ -51,6 +51,7 @@ htmlcov/
 *.log
 logs/
 tmp/
+.tmp/
 *.sqlite3
 *.sqlite
 
@@ -76,3 +77,5 @@ docker-compose.override.yml
 
 # ---- Project ignore ----
 transcripts/
+job-data/
+.worker-inputs/

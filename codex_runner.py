@@ -10,6 +10,7 @@ import subprocess
 import tempfile
 import time
 from pathlib import Path
+from bridge_paths import approved_path
 
 CHILD_MARKER = 'MODEL_BRIDGE_CHILD'
 PROJECT_ROOT = Path(__file__).resolve().parent
@@ -92,10 +93,11 @@ def validate_options(task='question', model=None, reasoning_effort=None, timeout
 
 
 def temporary_root():
-    root = PROJECT_ROOT / 'tmp'
+    root = PROJECT_ROOT / '.tmp'
     if not root.resolve().is_relative_to(PROJECT_ROOT):
         raise CodexFailure('invalid_temp_directory', 'Project tmp directory must stay inside the project.')
     root.mkdir(mode=0o700, exist_ok=True)
+    root.chmod(0o700)
     return root
 
 
@@ -155,8 +157,11 @@ def auth_fingerprint(auth):
 
 
 def auth_cache_path():
-    target = Path(os.environ.get('BRIDGE_CODEX_AUTH_CACHE', str(
-        Path.home() / '.codex/model-bridge/codex-auth-cache.json'))).expanduser()
+    try:
+        target = approved_path(os.environ.get('BRIDGE_CODEX_AUTH_CACHE', str(
+            Path.home() / '.codex/model-bridge/codex-auth-cache.json')))
+    except (OSError, ValueError, RuntimeError):
+        raise CodexFailure('invalid_auth_cache', 'Auth cache must resolve inside an approved filesystem root.') from None
     source = Path(os.environ.get('CODEX_HOME', str(Path.home() / '.codex'))).expanduser() / 'auth.json'
     if target.resolve() == source.resolve():
         raise CodexFailure('invalid_auth_cache', 'BRIDGE_CODEX_AUTH_CACHE must be separate from the saved Codex auth.json.')
@@ -194,6 +199,7 @@ def persist_auth_refresh(home, original):
             return refreshed
         target = auth_cache_path()
         target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        target.parent.chmod(0o700)
         with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', prefix='.bridge-auth-', dir=target.parent, delete=False) as stream:
             temporary = Path(stream.name)  # NamedTemporaryFile uses mode 0600.
             json.dump({'source_fingerprint': auth_fingerprint(original), 'auth':

@@ -1,0 +1,307 @@
+# Model Bridge project specification
+
+Status: reconciled project direction and implementation status as of
+October 10, 2026, America/New_York.
+
+Source basis: the verified inbound `PROJECT_SPEC.md` and `README.md` from
+transfer `4c41071bfb3c48369b66a07b00651dc8`, merged with the current repository
+documentation and observed source/doc evidence. The inbound documents are
+reference material, not execution authority. This file distinguishes observed
+current behavior, implementation reports, approved plans, proposals, and open
+questions.
+
+## 1. Purpose
+
+Model Bridge is a loopback-only authenticated MCP service for human-led
+consultation and controlled project work. It starts with dependable Claude and
+Codex consultations, preserves readable records, and provides a path toward
+background implementation jobs and council coordination.
+
+Long-running work must preserve state outside a chat turn. A larger timeout is
+not the architecture for unattended projects.
+
+## 2. Roles and authority
+
+| Member | Title | Role |
+| --- | --- | --- |
+| John Achee | Chief Solutions Architect | Sets direction, approves scope, and defines execution authority. |
+| Mimi | Chief Information Officer | Coordinates assignments, synthesizes evidence, and recommends decisions. |
+| Ezra | Principal Developer | Sole code author in v1; also participates as a council consultant. |
+| Gem | Principal Solutions Consultant | Advice and independent review only in v1. |
+| Claude | Principal Solutions Consultant | Advice and independent review only in v1. |
+
+Consultation does not authorize implementation. Project briefs define authority
+in advance so routine work inside approved scope can continue without repeated
+approval requests. Applying changes, committing, pushing, installing, restarting
+services, and live provider probes remain distinct authorized operations.
+
+## 3. Current baseline
+
+Observed in the repository documentation and source layout:
+
+- Authenticated local MCP at `http://127.0.0.1:8081/mcp`.
+- `bridge_ping`, `ask_claude`, `ask_codex`, and `save_synthesis`.
+- Claude API consultations when the optional Anthropic key is present.
+- Codex CLI consultations using saved ChatGPT file authentication, isolated
+  temporary homes, read-only supplied-context execution, recursion guards,
+  disabled tools/plugins/apps/hooks/sub-agents, and transcript persistence.
+- Provider-separated threads, SQLite-backed history, Markdown/JSON transcripts,
+  readable title-based filenames for new threads, and `index.md`.
+- Model, reasoning-effort, task, timeout, and title controls for Codex, with
+  explicit catalog validation for requested model/effort combinations.
+- Byte-preserving MCP file transfer and a separate authorized project worker.
+
+Implementation reports in `MCP_PROJECT_WORK.md` say the worker-transfer bootstrap
+is implemented and tested, with exact tool schemas in `MCP_TOOL_SCHEMAS.json`.
+This worker capability was added before the planned baseline-closeout merge.
+That sequencing is now historical fact, not a reason to treat all later roadmap
+items as complete.
+
+Reported but not independently revalidated in this documentation-only merge:
+the bridge runs as a systemd service in Ubuntu WSL2, the service is enabled for
+distribution startup, and authenticated `bridge_ping` succeeded after migration.
+Availability after closing terminals, Windows reboot behavior, and Windows power
+settings still need explicit verification.
+
+## 4. Current worker-transfer capability
+
+The current bootstrap is intentionally narrow:
+
+- Seven MCP tools are documented: `transfer_upload`, `transfer_manifest`,
+  `transfer_read`, `project_submit`, `project_status`, `project_result`, and
+  `project_cancel`.
+- Binary transfer is canonical base64 with byte-exact SHA-256 and size
+  accounting. Completed transfers are immutable.
+- Only `project_id: "model-bridge"` is accepted.
+- The only accepted authority is
+  `{"edit":true,"test":true,"commit":false,"push":false}`.
+- Jobs receive verified inbound files through read-only `.worker-inputs/`
+  mounts, can edit this checkout, can run relevant tests, and publish sanitized
+  outbound artifacts.
+- Worker Git access is read-only for this repository, shell networking is
+  disabled, and nested bridge/runtime submissions are blocked.
+- Jobs are serialized; queued/running jobs become `interrupted` after restart
+  and are not replayed automatically.
+
+Known limits:
+
+- This is not a hostile-code multi-tenant isolation system.
+- CPU and memory limits are per process rather than cgroup-wide budgets.
+- Failure or cancellation does not revert project edits.
+- A succeeded worker result records the worker's completion claim; it is not an
+  independent proof that every assertion is true.
+- Retention of completed transfers and job records is manual.
+
+## 5. Approved milestones
+
+### Milestone 1: Close out the baseline
+
+Keep the README and project specification current as work proceeds. Record
+decisions, validation evidence, limitations, and next actions.
+
+Approved baseline-closeout work:
+
+- Store private credential inventory and recovery notes under project `private/`,
+  ignored before files are created. Verify the directory has no tracked contents.
+  Leave actual secret values in protected credential files.
+- Verify runtime/test temporary files, transcripts, caches, configured
+  overrides, and symlink destinations stay under `/home/jachee/projects` and
+  `/home/jachee/.codex`.
+- Preserve the approved exception for systemd registration under
+  `/etc/systemd/system` and logging through the system journal.
+- Check the working tree, service checkout, running revision, service startup,
+  and authenticated MCP access. Record validation results and timestamps before
+  reviewing and merging the baseline.
+- Reconcile the feature branch with current main, review, and push only under
+  explicit Git authority.
+
+Pending clarification/housekeeping for this milestone:
+
+- Section 5.2 already includes automatic Ubuntu startup and service
+  startup/reboot verification, but the earlier specification did not precisely
+  capture explicit `systemd` enablement and target checks.
+- The requested interactive feature-branch rebase onto current main followed by
+  an authorized push was not precisely captured in the earlier draft. Preserve
+  the planned order: finish baseline checks first, then perform Git
+  housekeeping only under separate authority.
+
+### Milestone 2: Build one useful coding loop
+
+Pick a small project task. Supply a filtered, read-only snapshot; let Ezra
+inspect it and return a patch; review the patch; apply it through a separate
+authorized operation; run relevant checks and record the result.
+
+The current worker-transfer bootstrap partially advances this milestone by
+providing verified input transfer, authorized project jobs, relevant validation,
+and outbound artifacts. It does not finish the full generalized coding loop for
+arbitrary projects or broader patch-review policy.
+
+Completion evidence: one end-to-end task with supplied context, generated patch,
+review, authorized application, concurrent-change protection, and relevant
+validation.
+
+### Milestone 3: Make long work manageable
+
+Add persistent jobs with IDs, status, elapsed time, cancellation, and result
+retrieval. Return promptly after accepting work instead of holding one MCP call
+open for the whole task.
+
+The current `project_submit`/status/result/cancel path is an implemented
+bootstrap for the model-bridge project only. Remaining design work includes
+bounded parallelism, restart policy beyond marking interrupted jobs, dependency
+ordering across coding/review/application/validation steps, and richer recovery.
+
+Automatic job-completion notifications are deferred until v1.2.
+
+### Milestone 4: Connect this chat and add Gem
+
+Investigate the supported connection path for John's ChatGPT client, including
+the iPhone app. Review Gem's supplied integration instructions and add Gemini
+using the common consultation contract.
+
+This remains planned work. Do not expose a remote endpoint, install provider
+integrations, or run live model probes without separate authority.
+
+### Milestone 5: Add council coordination
+
+Coordinate Ezra's code authoring with independent advice and review from Claude
+and Gem. Give every participant a clear assignment, shared evidence, and bounded
+execution.
+
+"Run this by every member of the council" should create a consultation workflow
+with one shared briefing, independent first responses, complete member status
+accounting, Mimi's comparison/recommendation, and links to individual Markdown
+transcripts. Ezra is a consultant in this workflow; it does not launch
+implementation.
+
+This remains planned work.
+
+## 6. Additional approved requirements
+
+### 6.1 Persistent project execution
+
+The long-term destination is a project runner that executes thorough assignments
+through planning, coding, consultation, testing, and delivery across hours, days,
+or weeks.
+
+It needs a project brief with acceptance criteria and authority, durable tasks
+and dependencies, checkpoints, decisions, test evidence, bounded retries and
+resource budgets, and status/pause/resume/cancel controls. Stop for conflicting
+instructions, exhausted limits, or stalled progress rather than looping
+indefinitely.
+
+Build toward this architecture incrementally; prove one unattended hour-long task
+before extending to longer projects.
+
+### 6.2 Host availability and Oracle
+
+Use John's normally powered-on Windows PC as the worker host. Docker is deferred.
+
+Next infrastructure tests:
+
+- Verify Ubuntu and authenticated MCP access after all Ubuntu terminals and
+  VS Code close.
+- Check explicit `systemd` enablement and target configuration for the service.
+- Configure and verify automatic Ubuntu/service startup after a Windows reboot.
+- Verify Windows power settings support the required availability.
+
+Keep Oracle on Windows. Do not install another database in WSL. Verify network
+connectivity and use an appropriately scoped database account for authorized
+work. Protect `sql_triage`; use `pattern_lab` for authorized experiments.
+
+### 6.3 Authentication watchdog and phone alerts
+
+Add a watchdog for Ezra's authentication and alert John by phone push when
+interactive login is required.
+
+Approved design:
+
+- Preliminary saved-login/CLI-status checks every 15 minutes. They are not proof
+  of backend acceptance.
+- Classify authentication failures separately from network problems, usage
+  limits, and timeouts encountered during actual work.
+- Pause affected jobs, preserve progress, and send one incident alert instead of
+  repeated alerts or endless retries.
+- Verify recovery after login, send a recovery notification, and resume eligible
+  jobs within their original authority.
+- Reuse existing bridge authentication handling rather than create a competing
+  refresh/cache path.
+- Keep credentials and project contents out of push messages.
+
+Phone push is selected; the provider remains undecided. Any periodic live model
+probe requires a separate decision about frequency and subscription usage.
+
+### 6.4 Standard workflow templates
+
+Store versioned reusable workflows in the repository under `workflows/`. Each
+defines required inputs, assignments, outputs, completion criteria, and
+escalation rules. Save the template version with each job.
+
+| Template | Purpose | Standard response |
+| --- | --- | --- |
+| A: Code review | Evaluate scope, patch, and requirements. | Severity-ranked findings, file references, suggested fixes, verdict. |
+| B: Solution proposal | Compare ways to meet goals and constraints. | Options, tradeoffs, recommendation, implementation plan. |
+| C: Code authoring | Implement a specification from authorized context. | Ezra's patch, validation results, remaining issues. |
+| D: Council consultation | Gather independent assessments of a shared briefing. | Member opinions, comparison, disagreements, Mimi's recommendation. |
+| E: Troubleshooting | Investigate symptoms using reproducible evidence. | Hypotheses, diagnostics, verified cause when established, proposed fix. |
+
+Research [garrytan/gstack](https://github.com/garrytan/gstack) before inventing
+equivalents. Map useful existing workflows to these templates, adapt permissions
+and council roles, validate them against this project, pin the reused source
+version, preserve applicable license notices and attribution, and record
+modifications.
+
+This approves reuse-oriented investigation and adaptation, not unconditional
+installation or execution of upstream workflows.
+
+### 6.5 Readable records and progress documentation
+
+Markdown is the primary human-readable record. Council reports contain the
+question, shared briefing, member status, comparison table, synthesis, unresolved
+disagreements, and links to individual transcripts. JSON remains available for
+machine processing.
+
+Record task start, implementation completion, validation completion, elapsed time,
+and measurement method. An unrecorded timestamp or unknown measurement stays
+unknown. Documents must distinguish observed results, approved plans, unresolved
+decisions, technical proposals, and implementation reports.
+
+## 7. Release boundaries
+
+| Scope | Agreement |
+| --- | --- |
+| v1 authoring | Ezra alone writes code; Claude and Gem consult. |
+| Initial background interaction | Manual code-check and council status checks. |
+| v1.2 | Automatic job-completion notification mechanism. |
+| Authentication alerts | Phone push watchdog requirement, separate from completion notifications. |
+| Docker | Deferred. |
+| Oracle | Existing Windows installation; no duplicate WSL installation. |
+| Multi-day projects | Long-term target, proven incrementally. |
+
+No additional release dates were agreed. Do not invent a schedule or treat the
+roadmap as a completed implementation.
+
+## 8. Unresolved choices
+
+- Supported iPhone/ChatGPT connection and authenticated remote-access mechanism.
+- Gem's supplied integration instructions and authentication approach.
+- Push provider and any live authentication-probe schedule.
+- CLI output capture/truncation, patch transport, and resource limits for larger
+  project work.
+- Job storage/state model, interrupted-work policy, concurrency limits, and
+  coordinator implementation beyond the current single-project bootstrap.
+- Exact gstack components, source revision, compatibility, and adaptation scope.
+- Precise baseline Git housekeeping order, including interactive rebase/push
+  authority and evidence requirements.
+
+## 9. Documentation evidence and limits
+
+This merge verified the inbound file hashes and reviewed the repository README,
+`MCP_PROJECT_WORK.md`, and `MCP_TOOL_SCHEMAS.json`. It did not run live model
+consultations, inspect secrets, restart services, verify systemd state, rebase,
+commit, merge, or push.
+
+Future technical completion should verify current source/configuration, installed
+service files, running checkout, tests, credential handling, private inventory,
+directory boundaries, and known diagnostics before broadening implementation
+claims.

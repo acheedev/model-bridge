@@ -1,0 +1,218 @@
+{
+  "transfer_upload": {
+    "$defs": {
+      "TransferFile": {
+        "additionalProperties": false,
+        "properties": {
+          "filename": {
+            "title": "Filename",
+            "type": "string"
+          },
+          "content_base64": {
+            "title": "Content Base64",
+            "type": "string"
+          }
+        },
+        "required": [
+          "filename",
+          "content_base64"
+        ],
+        "title": "TransferFile",
+        "type": "object"
+      }
+    },
+    "properties": {
+      "files": {
+        "items": {
+          "$ref": "#/$defs/TransferFile"
+        },
+        "title": "Files",
+        "type": "array"
+      }
+    },
+    "required": [
+      "files"
+    ],
+    "title": "transfer_uploadArguments",
+    "type": "object"
+  },
+  "transfer_manifest": {
+    "properties": {
+      "direction": {
+        "enum": [
+          "inbound",
+          "outbound"
+        ],
+        "title": "Direction",
+        "type": "string"
+      },
+      "transfer_id": {
+        "title": "Transfer Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "direction",
+      "transfer_id"
+    ],
+    "title": "transfer_manifestArguments",
+    "type": "object"
+  },
+  "transfer_read": {
+    "properties": {
+      "direction": {
+        "enum": [
+          "inbound",
+          "outbound"
+        ],
+        "title": "Direction",
+        "type": "string"
+      },
+      "transfer_id": {
+        "title": "Transfer Id",
+        "type": "string"
+      },
+      "filename": {
+        "title": "Filename",
+        "type": "string"
+      }
+    },
+    "required": [
+      "direction",
+      "transfer_id",
+      "filename"
+    ],
+    "title": "transfer_readArguments",
+    "type": "object"
+  },
+  "project_submit": {
+    "$defs": {
+      "Authority": {
+        "additionalProperties": false,
+        "properties": {
+          "edit": {
+            "title": "Edit",
+            "type": "boolean"
+          },
+          "test": {
+            "title": "Test",
+            "type": "boolean"
+          },
+          "commit": {
+            "title": "Commit",
+            "type": "boolean"
+          },
+          "push": {
+            "title": "Push",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "edit",
+          "test",
+          "commit",
+          "push"
+        ],
+        "title": "Authority",
+        "type": "object"
+      }
+    },
+    "properties": {
+      "assignment": {
+        "title": "Assignment",
+        "type": "string"
+      },
+      "acceptance_criteria": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Acceptance Criteria",
+        "type": "array"
+      },
+      "project_id": {
+        "title": "Project Id",
+        "type": "string"
+      },
+      "authority": {
+        "$ref": "#/$defs/Authority"
+      },
+      "inbound_transfer_ids": {
+        "anyOf": [
+          {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Inbound Transfer Ids"
+      },
+      "deadline_seconds": {
+        "default": 600,
+        "title": "Deadline Seconds",
+        "type": "integer"
+      },
+      "memory_mb": {
+        "default": 2048,
+        "title": "Memory Mb",
+        "type": "integer"
+      },
+      "cpu_seconds": {
+        "default": 600,
+        "title": "Cpu Seconds",
+        "type": "integer"
+      }
+    },
+    "required": [
+      "assignment",
+      "acceptance_criteria",
+      "project_id",
+      "authority"
+    ],
+    "title": "project_submitArguments",
+    "type": "object"
+  },
+  "project_status": {
+    "properties": {
+      "job_id": {
+        "title": "Job Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "job_id"
+    ],
+    "title": "project_statusArguments",
+    "type": "object"
+  },
+  "project_result": {
+    "properties": {
+      "job_id": {
+        "title": "Job Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "job_id"
+    ],
+    "title": "project_resultArguments",
+    "type": "object"
+  },
+  "project_cancel": {
+    "properties": {
+      "job_id": {
+        "title": "Job Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "job_id"
+    ],
+    "title": "project_cancelArguments",
+    "type": "object"
+  }
+}
