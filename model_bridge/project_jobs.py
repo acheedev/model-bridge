@@ -16,11 +16,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from contextlib import contextmanager
 
-import codex_runner
-from bridge_paths import approved_path
-from file_transfers import FILE_BYTES, TOTAL_BYTES, TransferError, directory, read_file, write_file, valid_id, valid_name
+from . import codex_runner
+from .bridge_paths import approved_path
+from .file_transfers import FILE_BYTES, TOTAL_BYTES, TransferError, directory, read_file, write_file, valid_id, valid_name
 
-PROJECT = Path(__file__).resolve().parent
+PROJECT = Path(__file__).resolve().parents[1]
 PROJECTS = {'model-bridge': PROJECT}
 TERMINAL = {'succeeded', 'failed', 'cancelled', 'interrupted'}
 MAX_OUTPUT = 1024 * 1024
@@ -349,7 +349,7 @@ class JobManager:
                 if auth is not None:
                     private_json(home / 'auth.json', codex_runner.cached_subscription_auth(auth))
                     auth_written = True
-                child = subprocess.Popen([sys.executable, str(PROJECT / 'project_worker.py'), str(job_dir / 'launch.json')],
+                child = subprocess.Popen([sys.executable, str(PROJECT / 'model_bridge' / 'project_worker.py'), str(job_dir / 'launch.json')],
                     stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, start_new_session=True)
                 job['worker_started_at'] = timestamp()
                 self.save(job)

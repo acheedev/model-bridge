@@ -10,10 +10,10 @@ import subprocess
 import tempfile
 import time
 from pathlib import Path
-from bridge_paths import approved_path
+from .bridge_paths import approved_path
 
 CHILD_MARKER = 'MODEL_BRIDGE_CHILD'
-PROJECT_ROOT = Path(__file__).resolve().parent
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 TERMINATE_GRACE_SECONDS = 2
 REAP_GRACE_SECONDS = 2
 CLEANUP_SECONDS = TERMINATE_GRACE_SECONDS + REAP_GRACE_SECONDS

@@ -3,8 +3,8 @@ import os
 from typing import Literal
 from mcp.types import ToolAnnotations
 from pydantic import BaseModel, ConfigDict, StrictBool, StrictStr
-from file_transfers import TransferError, TransferStore
-from project_jobs import JobError, JobManager
+from .file_transfers import TransferError, TransferStore
+from .project_jobs import JobError, JobManager
 
 
 class Runtime:

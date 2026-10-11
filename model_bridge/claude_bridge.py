@@ -1,10 +1,10 @@
 """Personal, loopback-only Claude MCP bridge. Python 3.10+, mcp v1, anthropic.
 
-Run: CLAUDE_MODEL=claude-haiku-5-5 BRIDGE_MAX_TOKENS=4096 python claude_bridge.py
+Run: CLAUDE_MODEL=claude-haiku-5-5 BRIDGE_MAX_TOKENS=4096 python -m model_bridge.claude_bridge
 See README.md for the absolute WSL startup command and CODEX_BIN setting.
 Endpoint: http://127.0.0.1:8081/mcp
 Header: Authorization: Bearer <contents of ~/.codex/model-bridge/bridge.token>
-Secrets stay in ~/.codex/model-bridge; transcripts beside this script in transcripts/.
+Secrets stay in ~/.codex/model-bridge; transcripts in the project root transcripts/.
 CLAUDE_MODEL defaults to claude-sonnet-5-5. Set it to claude-haiku-5-5 for tests.
 BRIDGE_MAX_TOKENS defaults to 4096; BRIDGE_MAX_CALLS defaults to 20 per process.
 The call limit is a guardrail, not a dollar budget; restarting resets it.
@@ -30,10 +30,10 @@ from anthropic import Anthropic
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 from pydantic import Field
-import codex_runner
-from bridge_paths import approved_path, transcript_directory
-from bridge_runtime import Runtime, register_tools
-from file_transfers import REQUEST_BYTES
+from . import codex_runner
+from .bridge_paths import approved_path, transcript_directory
+from .bridge_runtime import Runtime, register_tools
+from .file_transfers import REQUEST_BYTES
 
 CONFIG = approved_path(Path.home() / '.codex/model-bridge')
 DATA = transcript_directory()

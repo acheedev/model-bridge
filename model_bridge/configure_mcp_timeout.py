@@ -6,7 +6,7 @@ import stat
 import tempfile
 from pathlib import Path
 
-from codex_runner import mcp_timeout_seconds
+from .codex_runner import mcp_timeout_seconds
 
 
 def aligned_config(text, seconds):

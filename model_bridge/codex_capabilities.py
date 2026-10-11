@@ -1,7 +1,7 @@
 """Print supported model/effort combinations from the installed CLI, offline."""
 import json
 
-from codex_runner import CodexFailure, consultation_deadline, discover_capabilities
+from .codex_runner import CodexFailure, consultation_deadline, discover_capabilities
 
 
 if __name__ == '__main__':

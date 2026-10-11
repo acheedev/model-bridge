@@ -12,10 +12,10 @@ import time
 import uuid
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import codex_runner
-from bridge_paths import approved_path
-from file_transfers import TransferStore, valid_id
-from project_jobs import JobManager, TERMINAL
+from model_bridge import codex_runner
+from model_bridge.bridge_paths import approved_path
+from model_bridge.file_transfers import TransferStore, valid_id
+from model_bridge.project_jobs import JobManager, TERMINAL
 
 
 def main():
@@ -94,7 +94,7 @@ print(json.dumps(report))
                 parent = os.environ.copy()
                 for marker in ('MODEL_BRIDGE_CHILD', 'PROJECT_WORKER_CHILD'):
                     parent.pop(marker, None)
-                run = subprocess.run([sys.executable, str(project / 'project_worker.py'), str(launch)],
+                run = subprocess.run([sys.executable, str(project / 'model_bridge' / 'project_worker.py'), str(launch)],
                                      env=parent, capture_output=True, text=True, timeout=30, start_new_session=True)
                 assert run.returncode == 0, run.stderr[:1000]
                 report = json.loads(run.stdout)

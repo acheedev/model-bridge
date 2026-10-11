@@ -14,10 +14,10 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-import claude_bridge as bridge
-import codex_runner
-import file_transfers as transfer
-import project_jobs as jobs
+from model_bridge import claude_bridge as bridge
+from model_bridge import codex_runner
+from model_bridge import file_transfers as transfer
+from model_bridge import project_jobs as jobs
 
 
 def encoded(name, data):
@@ -147,6 +147,12 @@ print('worker output private-known-token')
 
 
 class JobTests(unittest.TestCase):
+    def test_package_layout_preserves_worker_project_root(self):
+        project = Path(jobs.__file__).resolve().parents[1]
+        self.assertEqual(jobs.PROJECT, project)
+        self.assertEqual(jobs.PROJECTS['model-bridge'], project)
+        self.assertTrue((project / 'model_bridge' / 'project_worker.py').is_file())
+
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory(dir=codex_runner.temporary_root(),prefix='job-test-')
         self.addCleanup(self.tmp.cleanup)
@@ -279,7 +285,7 @@ class JobTests(unittest.TestCase):
         self.assertEqual(limits,{'memory':512*1024**2,'cpu':10,'core':0,'nofile':256})
 
     def test_nested_launcher_refuses_before_reading_launch_file(self):
-        result=subprocess.run([sys.executable,str(jobs.PROJECT/'project_worker.py'),'missing-launch.json'],
+        result=subprocess.run([sys.executable,str(jobs.PROJECT/'model_bridge'/'project_worker.py'),'missing-launch.json'],
                    env={**os.environ,'PROJECT_WORKER_CHILD':'1'},capture_output=True,text=True)
         self.assertNotEqual(result.returncode,0)
         self.assertIn('Nested project workers are disabled',result.stderr)

@@ -10,10 +10,10 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-import claude_bridge as bridge
-import codex_runner as runner
-import configure_mcp_timeout as client_config
-import bridge_paths
+from model_bridge import claude_bridge as bridge
+from model_bridge import codex_runner as runner
+from model_bridge import configure_mcp_timeout as client_config
+from model_bridge import bridge_paths
 
 
 def temporary_test_directory():
@@ -428,6 +428,14 @@ class RunnerTests(unittest.TestCase):
 
 
 class PathBoundaryTests(unittest.TestCase):
+    def test_package_layout_keeps_runtime_stores_at_checkout_root(self):
+        project = Path(bridge_paths.__file__).resolve().parents[1]
+        self.assertEqual(bridge_paths.PROJECT_ROOT, project)
+        self.assertEqual(runner.PROJECT_ROOT, project)
+        with patch.dict(os.environ, clear=True):
+            self.assertEqual(bridge_paths.transcript_directory(), project / 'transcripts')
+            self.assertEqual(runner.temporary_root(), project / '.tmp')
+
     def setUp(self):
         self.tmp = temporary_test_directory()
         self.addCleanup(self.tmp.cleanup)

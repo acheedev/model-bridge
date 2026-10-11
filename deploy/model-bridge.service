@@ -11,7 +11,7 @@ Environment=BRIDGE_MAX_TOKENS=4096
 Environment=CODEX_TIMEOUT_SECONDS=120
 Environment=CODEX_BIN=/home/jachee/.vscode-server/extensions/openai.chatgpt-26.1007.21434-linux-x64/bin/linux-x86_64/codex
 Environment=PYTHONUNBUFFERED=1
-ExecStart=/home/jachee/projects/acheedev/model-bridge/.venv/bin/python /home/jachee/projects/acheedev/model-bridge/claude_bridge.py
+ExecStart=/home/jachee/projects/acheedev/model-bridge/.venv/bin/python -m model_bridge.claude_bridge
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=10

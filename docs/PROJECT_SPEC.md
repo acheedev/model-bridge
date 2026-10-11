@@ -3,6 +3,11 @@
 Status: reconciled project direction and implementation status as of
 October 10, 2026, America/New_York.
 
+Layout update, October 11, 2026: Python source is in `model_bridge/`, documentation
+in `docs/`, launch scripts in `scripts/`, and the maintained unit in `deploy/`.
+Runtime stores remain at the checkout root. The ordered [project checklist](TASKS.md)
+tracks implementation and outstanding validation without changing this specification's scope.
+
 Source basis: the verified inbound `PROJECT_SPEC.md` and `README.md` from
 transfer `4c41071bfb3c48369b66a07b00651dc8`, merged with the current repository
 documentation and observed source/doc evidence. The inbound documents are

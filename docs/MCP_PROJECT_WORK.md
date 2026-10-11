@@ -200,6 +200,11 @@ locally for recovery. Cancellation of a never-started queued job has no artifact
 
 ## Client proof: actual Windows files, then a separate assignment
 
+Historical bootstrap procedure: the specification records a subsequent verified
+documentation transfer and merge. The file readback and separate-assignment steps
+below remain the repeatable client proof; references to root-level documentation
+predate the move to `docs/`.
+
 No copies of Mimi's Windows `README.md` or `PROJECT_SPEC.md` were supplied during
 this bootstrap. They have not been transferred or incorporated. This document is
 implementation documentation, not a substitute for either file.

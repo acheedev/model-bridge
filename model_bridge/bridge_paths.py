@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 
 APPROVED_ROOTS = (Path('/home/jachee/projects'), Path('/home/jachee/.codex'))
-PROJECT_ROOT = Path(__file__).resolve().parent
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 def approved_path(path):
