@@ -1,0 +1,634 @@
+# Public audit diff, 2026-10-11
+
+Scope: .gitignore and public documentation touched by the credential inventory/directory-boundary audit. Excludes private/, secret/auth files, environment dumps, and logs.
+
+diff --git a/.gitignore b/.gitignore
+index a7189b3..dd031c2 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -79,4 +79,5 @@ docker-compose.override.yml
+ transcripts/
+ job-data/
+ .worker-inputs/
++/private/
+ private/
+diff --git a/docs/OPERATIONS.md b/docs/OPERATIONS.md
+index 58c0e54..8818c42 100644
+--- a/docs/OPERATIONS.md
++++ b/docs/OPERATIONS.md
+@@ -353,3 +353,13 @@ Consultation and capability-check temporary directories live in `.tmp/` in the p
+ also receives `TMPDIR` inside its private directory. Tests explicitly create
+ their temporary fixtures under the same project `.tmp/`, independent of the
+ caller’s `TMPDIR`. `.tmp/` is Git-ignored.
++
++## Security and boundary audits
++
++The October 11, 2026 private credential inventory and directory-boundary audit is
++summarized in
++[DIRECTORY_BOUNDARY_AUDIT_2026-10-11.md](DIRECTORY_BOUNDARY_AUDIT_2026-10-11.md).
++The public report records status, evidence limits, and follow-up without copying
++private note contents or secret values. Keep future audit artifacts sanitized the
++same way: public reports may describe counts, checks, and unresolved questions,
++while credential procedures stay under ignored `private/`.
+diff --git a/docs/TASKS.md b/docs/TASKS.md
+index 5b827c5..9847ecb 100644
+--- a/docs/TASKS.md
++++ b/docs/TASKS.md
+@@ -1,85 +1,289 @@
+ # Project checklist
+ 
+ Updated October 11, 2026. Work top to bottom; each box is a useful stopping point.
+-Checked items have source or documentation evidence. Live service, host, and
+-end-to-end behavior need their own checks. This list tracks work, not permission
+-to install, restart, commit, push, expose endpoints, or run paid model probes.
++Checked items have source, validation, or explicitly reported historical evidence.
++Each item separates implementation from verification when those facts differ.
++This list tracks work; it does not grant permission to install, restart, commit,
++push, expose endpoints, run paid model probes, or perform roadmap tasks.
++
++## Current evidence boundaries
++
++- Current layout validation: Implemented / Last verified: October 11, 2026 in a
++  disposable checkout / Evidence: [validation](VALIDATION.md) records 93 passing
++  tests, compile checks, shell syntax, `git diff --check`, local Markdown
++  navigation, and private inventory exclusion. Task start, implementation
++  completion, validation completion, and total duration were not captured for
++  that validation run and remain unknown.
++- Post-restructure authenticated connectivity: Recheck needed for broader
++  behavior / Last verified: 2026-10-11 16:45:32.208822 -0400 and reported
++  immediately before this documentation assignment / Evidence: authenticated
++  `bridge_ping` returned `status: ok`, echoed the expected message, made no
++  model call, and advertised all 11 tools including all seven transfer/project
++  tools. This proves authenticated endpoint reachability and schema exposure
++  only; it does not prove installed-unit reconciliation, transfer roundtrip,
++  cancellation/recovery, reboot startup, or worker execution.
++- Historical worker-transfer proof: Historically passed / Last verified:
++  earlier bootstrap, exact timestamp not supplied here / Evidence: all seven
++  transfer/project tools were discovered; client upload/readback of `README.md`
++  and `PROJECT_SPEC.md` independently matched byte counts, bytes, and SHA-256;
++  original job `0fdb620e9589472cb35b275c31dbf903` failed; after input-mount
++  repair, retry job `549ac2a1731a445fbf9b5b18a6ee4b1d` used inbound transfer
++  `4c41071bfb3c48369b66a07b00651dc8` and outbound transfer
++  `03457b8540884be49790318b1b148603`; the client locally verified returned
++  `README.md`, `PROJECT_SPEC.md`, report, and patch hashes. Worker-reported
++  preservation of useful existing README content remains a worker claim, not
++  independent source-state verification. The assignment did not provide the
++  literal byte counts or SHA-256 values, so they are not invented here.
++- Historical Git closeout: Reported historical closeout / Last verified: John
++  relayed Ezra's report, timestamp not supplied here / Evidence: branch
++  `feature/codex-runner` was reported rebased, fast-forward pushed,
++  merged/pushed to `main` at commit `11a56a1`, deleted locally/remotely, and
++  left a clean tree with 91 previously passing tests. This is not evidence of
++  the current layout's Git status and is not an unresolved future rebase for an
++  already deleted branch.
++- Startup after sign-in: Historically passed for checkpoint reachability only /
++  Last verified: John observed launch after Windows PIN sign-in; Mimi checked
++  authenticated bridge access at 2026-10-11 01:18:20 -0400 / Evidence: Windows
++  Task Scheduler task runs under `aihub\default` with interactive logon and
++  launches Ubuntu as `jachee` with `sleep infinity`; John supplied task
++  `Running` and Ubuntu-running output after a PC reboot, roughly 30 seconds
++  after sign-in. This does not prove pre-sign-in startup, uninterrupted uptime,
++  Windows power settings, or an unattended hour-long assignment.
++
++Prior totals of 90 and 91 passing tests are historical. Today's layout validation
++total is 93 tests, within the boundaries above.
+ 
+ ## 1. Give the project a clean home
+ 
+-- [x] Put Python code in `model_bridge/`, documentation in `docs/`, launch scripts in `scripts/`, and service configuration in `deploy/`.
+-- [x] Update imports, worker launch paths, startup commands, and documentation links.
++- [x] Put Python code in `model_bridge/`, documentation in `docs/`, launch
++  scripts in `scripts/`, and service configuration in `deploy/`.
++  Status: Implemented. Last verified: layout validation, October 11, 2026.
++- [x] Update imports, worker launch paths, startup commands, and documentation
++  links.
++  Status: Implemented. Last verified: 93-test layout validation and local link
++  check. Recheck needed for installed/running service reconciliation.
+ - [x] Keep transcripts, temporary files, and job data rooted in the checkout.
++  Status: Implemented by source/tests. Last verified: layout validation. Recheck
++  needed for full directory/override/cache/symlink audit.
+ - [x] Add a short README with navigation and a Python package manifest.
++  Status: Implemented. Last verified: layout validation and documentation read.
+ - [x] Ignore `private/` before creating any private inventory.
+-- [ ] Update the installed service to the new module entry point and verify authenticated startup under separate service authority.
++  Status: Implemented. Last verified: layout validation confirmed `private/` is
++  ignored and has no tracked files.
++- [x] Update the installed service to the new module entry point and verify
++  authenticated startup under separate service authority.
++  Status: Implemented/reported and spot-verified. Last verified:
++  [systemd service validation](VALIDATION.md#systemd-service-validation).
++  Recheck needed for service/source/running-revision reconciliation.
+ 
+ ## 2. Close the baseline
+ 
+-- [x] Run existing tests and record results, known diagnostics, and validation limits: [layout validation](VALIDATION.md).
+-- [ ] Create private credential inventory and recovery notes without copying secret values; verify nothing in `private/` is tracked.
+-- [ ] Audit runtime/test directories, overrides, caches, and symlinks against the approved Linux roots; retain the systemd/journal exceptions.
+-- [ ] Reconcile this checkout, service checkout, installed unit, running revision, and working-tree changes.
+-- [ ] Verify explicit systemd enablement and startup target, then authenticated `bridge_ping`.
++- [x] Run existing tests and record results, known diagnostics, and validation
++  limits.
++  Status: Implemented. Last verified: [layout validation](VALIDATION.md) records
++  93 tests passed; earlier 90/91 totals remain historical only.
++- [x] Create private credential inventory and recovery notes without copying
++  secret values; verify nothing in `private/` is tracked.
++  Status: Completed for inventory locations and procedures on 2026-10-11.
++  Evidence: [directory boundary audit](DIRECTORY_BOUNDARY_AUDIT_2026-10-11.md)
++  records safe `private/` location, ignored/untracked verification, and private
++  note creation without credential contents in public artifacts. Protected-store
++  metadata and provider account state remain unresolved.
++- [x] Audit runtime/test directories, overrides, caches, and symlinks against
++  the approved Linux roots; retain the systemd/journal exceptions.
++  Status: Completed within sandbox-accessible evidence on 2026-10-11. Evidence:
++  [directory boundary audit](DIRECTORY_BOUNDARY_AUDIT_2026-10-11.md) records
++  source origins, resolved destinations, accessible metadata, verdicts, and
++  host-versus-sandbox limits. Host systemd/process facts remain pending under
++  the existing reconciliation item.
++- [ ] Reconcile this checkout, service checkout, installed unit, running revision,
++  and working-tree changes.
++  Status: Partially inspected on 2026-10-11; pending because sandbox isolation
++  blocked host systemd bus and real service process inspection. Evidence:
++  [baseline reconciliation](VALIDATION.md#baseline-reconciliation-2026-10-11)
++  records current checkout/HEAD/tracking refs, installed unit/template agreement,
++  readable target symlink, blocked active-state/MainPID checks, and loaded-source
++  uncertainty.
++- [x] Verify explicit systemd enablement and startup target, then authenticated
++  `bridge_ping`.
++  Status: Implemented for the observed installed service. Last verified:
++  [systemd service validation](VALIDATION.md#systemd-service-validation).
+ - [ ] Confirm MCP remains available after all Ubuntu terminals and VS Code close.
+-- [ ] Configure and verify Ubuntu/service startup after a Windows reboot; check Windows power settings.
++  Status: Pending.
++- [x] Verify automatic Ubuntu/service startup after Windows sign-in.
++  Status: Historically passed for after-sign-in checkpoint reachability. Last
++  verified: John observed post-reboot launch after PIN sign-in and Mimi checked
++  authenticated access at 2026-10-11 01:18:20 -0400. Recheck needed after any
++  startup mechanism changes.
++- [ ] Verify automatic Ubuntu/service startup before Windows sign-in.
++  Status: Pending. Account-password recovery was deferred.
++- [ ] Verify Windows power settings support the required availability.
++  Status: Pending.
+ - [ ] Review the baseline and record evidence and timestamps in the documentation.
+-- [ ] Under separate Git authority, reconcile the feature branch with current main, perform the planned interactive rebase, review, merge, and push in the agreed order.
++  Status: Pending overall because host running-revision and availability checks
++  remain open. Partial evidence is recorded in this checklist,
++  [validation](VALIDATION.md), and the
++  [directory boundary audit](DIRECTORY_BOUNDARY_AUDIT_2026-10-11.md).
++- [x] Record historical Git branch closeout separately from current layout work.
++  Status: Reported historical closeout. Last verified: John relayed Ezra's report
++  that `feature/codex-runner` was rebased, fast-forward pushed, merged/pushed to
++  `main` at `11a56a1`, deleted locally/remotely, and had 91 previously passing
++  tests. Recheck needed for the current layout's Git state only if separate Git
++  authority is granted.
+ 
+ ## 3. Prove one complete coding loop
+ 
+-- [x] Implement the narrow model-bridge worker with explicit edit/test authority and no commit/push authority.
+-- [x] Implement verified byte-preserving input transfers and sanitized outbound artifacts.
+-- [ ] Confirm client discovery of all seven worker-transfer tools after the authorized service update.
+-- [ ] Complete client byte/size/SHA-256 readback proof with actual reference files; keep the transfer receipt and comparison evidence.
+-- [ ] Choose one small task and write its brief, exact acceptance criteria, and authority.
+-- [ ] Supply a filtered read-only snapshot with provenance and hashes, excluding credentials.
+-- [ ] Return a reviewable patch and validation evidence; detect concurrent project changes before application.
+-- [ ] Review and apply the patch through a separately authorized step, run relevant checks, and save the end-to-end evidence.
+-- [ ] Decide broader project allowlisting, patch transport, output truncation, and resource limits before generalizing beyond model-bridge.
++- [x] Implement the narrow model-bridge worker with explicit edit/test authority
++  and no commit/push authority.
++  Status: Implemented. Last verified: layout validation covers tests; historical
++  worker job exercised the path.
++- [x] Implement verified byte-preserving input transfers and sanitized outbound
++  artifacts.
++  Status: Implemented. Last verified: layout validation and historical client
++  transfer/readback proof.
++- [x] Confirm client discovery of all seven worker-transfer tools after the
++  authorized service update.
++  Status: Historically passed and freshly schema-visible. Last verified:
++  historical client discovery of all seven tools; post-restructure authenticated
++  discovery exposed all 11 tools including the same seven. Evidence limit:
++  today's proof is discovery only.
++- [x] Complete client byte/size/SHA-256 readback proof with actual reference
++  files; keep the transfer receipt and comparison evidence.
++  Status: Historically passed for `README.md` and `PROJECT_SPEC.md`. Evidence:
++  inbound transfer `4c41071bfb3c48369b66a07b00651dc8`; client independently
++  matched byte counts, bytes, and SHA-256. Recheck needed for a fresh
++  post-restructure transfer roundtrip.
++- [x] Choose one small task and write its brief, exact acceptance criteria, and
++  authority.
++  Status: Historically passed for the model-driven documentation job. Evidence:
++  failed original job `0fdb620e9589472cb35b275c31dbf903`; successful retry
++  `549ac2a1731a445fbf9b5b18a6ee4b1d`.
++- [x] Supply a filtered read-only snapshot with provenance and hashes, excluding
++  credentials.
++  Status: Historically passed for the verified documentation-job inputs. Evidence
++  limit: literal hash values were not included in this assignment text.
++- [x] Return a reviewable patch and validation evidence.
++  Status: Historically passed for the documentation job's outbound retrieval.
++  Evidence: outbound transfer `03457b8540884be49790318b1b148603`; client locally
++  verified returned README, spec, report, and patch hashes. Worker claims are not
++  independent source-state verification.
++- [ ] Detect concurrent project changes before patch application and protect
++  against clobbering them.
++  Status: Unfulfilled as generalized worker enforcement. Artifact hash
++  verification proves byte-preserving transfer/retrieval, not concurrent-change
++  detection or protection. This documentation assignment performed an informal
++  before-edit status/diff check and preserved preexisting edits, but that is not
++  proof of a reusable protection mechanism.
++- [ ] Review and apply the patch through a separately authorized step, run
++  relevant checks, and save the end-to-end evidence.
++  Status: Recheck needed for current layout and current source state.
++- [ ] Decide broader project allowlisting, patch transport, output truncation,
++  and resource limits before generalizing beyond model-bridge.
++  Status: Pending.
+ 
+ ## 4. Make background work dependable
+ 
+-- [x] Implement durable job IDs, prompt acceptance, status/results, elapsed-time reporting, and cancellation.
+-- [x] Serialize bootstrap jobs and mark queued/running work interrupted after restart without automatic replay.
+-- [ ] Verify a model-driven job, result retrieval, cancellation, and interruption recovery end to end.
+-- [ ] Define the broader durable state model, restart policy, retention/disk limits, and recovery rules.
+-- [ ] Add task dependencies, checkpoints, bounded parallelism, retries, and resource budgets.
+-- [ ] Add status/pause/resume/cancel controls with clear stop rules for conflicts, exhausted limits, and stalled progress.
+-- [ ] Prove one unattended hour-long assignment before extending to multi-day projects.
++- [x] Implement durable job IDs, prompt acceptance, status/results, elapsed-time
++  reporting, and cancellation.
++  Status: Implemented. Last verified: tests and documentation.
++- [x] Serialize bootstrap jobs and mark queued/running work interrupted after
++  restart without automatic replay.
++  Status: Implemented. Last verified: tests and documentation.
++- [x] Verify a model-driven job and result retrieval end to end.
++  Status: Historically passed. Evidence: successful retry job
++  `549ac2a1731a445fbf9b5b18a6ee4b1d` and outbound transfer
++  `03457b8540884be49790318b1b148603`.
++- [ ] Verify live cancellation end to end.
++  Status: Pending live proof. Implemented cancellation/recovery code and unit
++  coverage are not a completed live cancellation proof.
++- [ ] Verify interruption recovery end to end after restart.
++  Status: Pending live proof. Implemented recovery behavior and unit coverage are
++  not a completed live recovery proof.
++- [ ] Define the broader durable state model, restart policy, retention/disk
++  limits, and recovery rules.
++  Status: Pending.
++- [ ] Add task dependencies, checkpoints, bounded parallelism, retries, and
++  resource budgets.
++  Status: Pending.
++- [ ] Add status/pause/resume/cancel controls with clear stop rules for conflicts,
++  exhausted limits, and stalled progress.
++  Status: Pending beyond the current bootstrap controls.
++- [ ] Prove one unattended hour-long assignment before extending to multi-day
++  projects.
++  Status: Pending. Evidence limit: one hour of reachable service is not one
++  unattended hour-long assignment.
+ 
+ ## 5. Connect ChatGPT and bring in Gem
+ 
+ - [ ] Select a supported authenticated connection for ChatGPT and the iPhone app.
+-- [ ] Review Gem's supplied integration instructions and decide Gemini authentication.
+-- [ ] Add Gemini through the common independent/critique/follow-up consultation contract.
+-- [ ] Under separate integration and live-probe authority, validate client access and Gemini behavior; preserve transcripts and usage evidence.
++  Status: Pending.
++- [ ] Review Gem's supplied integration instructions and decide Gemini
++  authentication.
++  Status: Pending.
++- [ ] Add Gemini through the common independent/critique/follow-up consultation
++  contract.
++  Status: Pending.
++- [ ] Under separate integration and live-probe authority, validate client access
++  and Gemini behavior; preserve transcripts and usage evidence.
++  Status: Pending.
+ 
+ ## 6. Build reusable council workflows
+ 
+-- [ ] Research `garrytan/gstack`; select useful components, pin a source revision, and retain licenses, attribution, and adaptation notes.
+-- [ ] Create versioned `workflows/` templates A-E: code review, solution proposal, code authoring, council consultation, and troubleshooting.
+-- [ ] Define inputs, assignments, outputs, completion criteria, and escalation rules; persist the template version with every job.
+-- [ ] Build one shared council briefing with independent first responses and bounded execution for each member.
+-- [ ] Report every member's status, disagreements, comparison, Mimi's recommendation, and links to individual transcripts; keep consultation separate from implementation authority.
+-- [ ] Record observed start/completion/validation times and elapsed-time measurement methods; leave unknown values unknown.
++- [ ] Research `garrytan/gstack`; select useful components, pin a source
++  revision, and retain licenses, attribution, and adaptation notes.
++  Status: Pending.
++- [ ] Create versioned `workflows/` templates A-E: code review, solution proposal,
++  code authoring, council consultation, and troubleshooting.
++  Status: Pending.
++- [ ] Define inputs, assignments, outputs, completion criteria, and escalation
++  rules; persist the template version with every job.
++  Status: Pending.
++- [ ] Build one shared council briefing with independent first responses and
++  bounded execution for each member.
++  Status: Pending.
++- [ ] Report every member's status, disagreements, comparison, Mimi's
++  recommendation, and links to individual transcripts; keep consultation
++  separate from implementation authority.
++  Status: Pending.
++- [ ] Record observed start/completion/validation times and elapsed-time
++  measurement methods; leave unknown values unknown.
++  Status: Pending as a reusable workflow requirement. This documentation
++  assignment records its own timings separately in the outbound report.
+ 
+ ## 7. Add authentication alerts and authorized database access
+ 
+-- [ ] Choose the phone-push provider and decide whether periodic live authentication probes are needed and at what usage cost.
+-- [ ] Add 15-minute saved-login/CLI-status checks using the existing authentication/cache path.
+-- [ ] Distinguish authentication failures from network errors, usage limits, and timeouts.
+-- [ ] Pause affected work, preserve progress, and send one credential-free incident alert.
+-- [ ] Verify login recovery, notify recovery, and resume eligible work within its original authority.
+-- [ ] Verify connectivity to the existing Windows Oracle installation with a scoped account; protect `sql_triage` and use `pattern_lab` only for authorized experiments.
++- [ ] Choose the phone-push provider and decide whether periodic live
++  authentication probes are needed and at what usage cost.
++  Status: Pending.
++- [ ] Add 15-minute saved-login/CLI-status checks using the existing
++  authentication/cache path.
++  Status: Pending.
++- [ ] Distinguish authentication failures from network errors, usage limits, and
++  timeouts.
++  Status: Pending.
++- [ ] Pause affected work, preserve progress, and send one credential-free
++  incident alert.
++  Status: Pending.
++- [ ] Verify login recovery, notify recovery, and resume eligible work within its
++  original authority.
++  Status: Pending.
++- [ ] Verify connectivity to the existing Windows Oracle installation with a
++  scoped account; protect `sql_triage` and use `pattern_lab` only for authorized
++  experiments.
++  Status: Pending.
+ 
+ ## Later: v1.2 and beyond
+ 
+-- [ ] Add automatic job-completion notifications in v1.2; keep initial status checks manual.
+-- [ ] Extend proven checkpoint/recovery behavior to assignments lasting days or weeks.
++- [ ] Add automatic job-completion notifications in v1.2; keep initial status
++  checks manual.
++  Status: Pending.
++- [ ] Extend proven checkpoint/recovery behavior to assignments lasting days or
++  weeks.
++  Status: Pending.
+ 
+ Docker remains deferred. No release dates have been agreed.
+ 
+ Sources: [specification](PROJECT_SPEC.md), [operations](OPERATIONS.md),
+-[worker-transfer guide](MCP_PROJECT_WORK.md), and [exact schemas](MCP_TOOL_SCHEMAS.json).
+-The bootstrap checkmarks describe implementation presence, not fresh live verification.
++[worker-transfer guide](MCP_PROJECT_WORK.md), [validation](VALIDATION.md), and
++[exact schemas](MCP_TOOL_SCHEMAS.json). Bootstrap checkmarks describe
++implementation presence or historical proof, not blanket fresh live verification.
+diff --git a/docs/VALIDATION.md b/docs/VALIDATION.md
+index 3b4790d..1e9f9cc 100644
+--- a/docs/VALIDATION.md
++++ b/docs/VALIDATION.md
+@@ -21,8 +21,9 @@ registration, job subprocess execution, resource limits, and cancellation.
+ 
+ This was local validation without live model requests. Authentication to provider
+ backends, installed service startup, client discovery, reboot availability, and
+-model-driven project completion remain unverified here. Earlier CLI/Code Mode
+-diagnostics in [operations](OPERATIONS.md) remain historical observations.
++model-driven project completion were outside this layout-validation run. Later
++sections record separate service and authenticated MCP checks. Earlier CLI/Code
++Mode diagnostics in [operations](OPERATIONS.md) remain historical observations.
+ 
+ The user reported that the bridge service is stopped. Its installed unit must
+ adopt the new module entry point before a separately authorized restart; the
+@@ -32,3 +33,143 @@ No commit, push, installation, or service restart was performed.
+ The test runner measured suite duration. Task start, implementation completion,
+ and validation completion timestamps were not captured; total task duration is
+ unknown.
++
++## Systemd service validation
++
++On October 11, 2026, the user installed the repository unit after the assistant's
++installation attempt was blocked by password-required sudo. The exact user
++installation completion timestamp was not recorded. No installation or restart
++was performed by the assistant.
++
++Host systemd inspection confirmed:
++
++- Unit: `/etc/systemd/system/model-bridge.service`, loaded, enabled, active/running.
++- Entry point: checkout `.venv/bin/python -m model_bridge.claude_bridge`.
++- Working directory: `/home/jachee/projects/acheedev/model-bridge`; user: `jachee`.
++- No drop-ins; PID at inspection: `185421`.
++- Observed service start: 2026-10-11 20:44:25 UTC
++  (2026-10-11 16:44:25 -0400, America/New_York).
++- Host default target: `graphical.target`; repository unit uses
++  `WantedBy=multi-user.target`.
++
++Post-restructure live MCP validation completed at 2026-10-11 20:45:32.208822 UTC
++(2026-10-11 16:45:32.208822 -0400, America/New_York). An authenticated SDK
++session to `http://127.0.0.1:8081/mcp` initialized successfully and
++`bridge_ping` for "Post-restructure authenticated bridge availability check"
++returned `status: ok` with the expected echo and no model call. A request without
++credentials returned HTTP 401. Credentials were not displayed.
++
++The server advertised all eleven tools, including the seven transfer/job tools:
++`transfer_upload`, `transfer_manifest`, `transfer_read`, `project_submit`,
++`project_status`, `project_result`, and `project_cancel`. This proves
++authenticated endpoint reachability and schema exposure only. Installed-unit
++reconciliation, fresh transfer roundtrip, cancellation/recovery, worker
++execution, provider login, availability after terminals close, pre-sign-in
++startup, uninterrupted uptime, and Windows power settings remain unverified here.
++
++Verification segment began at 2026-10-11 20:45:15.227846 UTC
++(2026-10-11 16:45:15.227846 -0400, America/New_York). Its monotonic start and
++completion timing are recorded in `.tmp/systemd-validation-timing.json`.
++
++## Baseline reconciliation 2026-10-11
++
++Read-only reconciliation inspection began at the first recorded timestamp
++2026-10-11 17:01:07 -0400 (2026-10-11 21:01:07 UTC), measured with `date`.
++Inspection and documentation validation completed at 2026-10-11 17:02:03 -0400
++(2026-10-11 21:02:03 UTC). Elapsed time from the first recorded timestamp to
++that completion check was 56 seconds. No fetch, stage, commit, rebase, merge,
++push, service restart, reload, installation, startup-task change, live model
++probe, credential dump, or configuration change was performed.
++
++Repository inspection:
++
++- Checkout: `/home/jachee/projects/acheedev/model-bridge`, resolving to the same
++  path with `readlink -f`.
++- Branch: `main`.
++- HEAD: `e55d157d9631b85644a0608f169c425e85d6176b`.
++- Locally available tracking ref: `origin/main` at
++  `e55d157d9631b85644a0608f169c425e85d6176b`; no fetch was performed.
++- Working tree before this reconciliation edit already had modified
++  documentation files: `docs/PROJECT_SPEC.md`, `docs/TASKS.md`, and
++  `docs/VALIDATION.md`. These preexisting edits were preserved and treated as
++  user-owned baseline content.
++- Git emitted permission warnings for a denied sandbox path under `job-data/...`
++  when looking for user config/ignore/attributes. No attempt was made to bypass
++  that restriction.
++
++Installed unit and template inspection:
++
++- Repository template: `deploy/model-bridge.service`.
++- Installed unit path: `/etc/systemd/system/model-bridge.service`.
++- `diff -u deploy/model-bridge.service /etc/systemd/system/model-bridge.service`
++  produced no differences, so the maintained template and installed unit agree
++  for the nonsecret launch settings inspected here.
++- Relevant launch settings in both files: `User=jachee`,
++  `WorkingDirectory=/home/jachee/projects/acheedev/model-bridge`,
++  `ExecStart=/home/jachee/projects/acheedev/model-bridge/.venv/bin/python -m
++  model_bridge.claude_bridge`, `Restart=on-failure`, `RestartSec=5`,
++  `TimeoutStopSec=10`, `UMask=0077`, and `WantedBy=multi-user.target`.
++- The service working directory resolves to
++  `/home/jachee/projects/acheedev/model-bridge`; the Python executable resolves
++  to `/usr/bin/python3.10`.
++- Readable enablement evidence: `/etc/systemd/system/multi-user.target.wants/model-bridge.service`
++  points to `/etc/systemd/system/model-bridge.service`. No drop-in files were
++  found by the targeted filesystem inspection.
++
++Blocked or inconclusive host/runtime checks:
++
++- `systemctl show` and active-state inspection failed in this sandbox with
++  `System has not been booted with systemd as init system (PID 1). Can't operate.`
++  and `Failed to connect to bus: Host is down`.
++- `systemctl is-enabled model-bridge.service` returned `enabled`, but the same
++  active-state command group could not connect to the systemd bus, so active
++  state, target relationship details from the manager, MainPID, restart count,
++  and active-enter timestamps were not freshly verified here.
++- Process inspection inside the sandbox did not expose a real
++  `model_bridge.claude_bridge` service process; the only matches were the
++  sandbox command itself. Actual process identity, executable/arguments, and
++  runtime working directory therefore remain unverified in this pass.
++- Because the running process could not be inspected, no evidence from this
++  assignment links a live loaded Python process to the current checkout, HEAD, or
++  uncommitted source state. Git HEAD and installed file agreement alone do not
++  prove the revision loaded into any long-running process.
++
++Discrepancies and smallest corrective next steps:
++
++- The installed unit/template point at this checkout and agree on launch
++  settings, while host active-state/process inspection was blocked by sandbox
++  isolation. Re-run the same sanitized systemd and `/proc` checks from a host
++  context that can see the real systemd manager and service process.
++- If a live service process is found, record its PID, sanitized command line,
++  resolved executable, process working directory, service start time, and a
++  source/load evidence boundary. For an already-running Python process with
++  uncommitted files, retain loaded-revision uncertainty unless a direct runtime
++  mechanism proves the loaded source revision.
++- Keep the generalized concurrent-change protection item open until the worker
++  implements and proves a reusable before-application check; artifact hash
++  verification is not sufficient.
++
++## Credential inventory and directory boundary audit 2026-10-11
++
++The bounded inventory/audit is recorded in
++[DIRECTORY_BOUNDARY_AUDIT_2026-10-11.md](DIRECTORY_BOUNDARY_AUDIT_2026-10-11.md).
++No code, runtime configuration, service state, permissions, credential stores,
++production data, live provider calls, Git history, commits, pushes, or
++authentication state were changed.
++
++Validation evidence:
++
++- `.gitignore` now contains the exact approved `/private/` rule while preserving
++  the preexisting `private/` rule.
++- `private/` resolved inside this checkout as a normal directory before notes
++  were written.
++- A private credential inventory/recovery note was created only after the
++  location, ignore, and tracking checks. Its contents are not reproduced in
++  public documentation.
++- `git check-ignore` confirmed the private note is ignored, and `git ls-files --
++  private` returned no tracked private paths.
++- Source and metadata checks covered transcript storage, job records, worker
++  homes/scratch, transfer roots, staged inputs, artifact publication, tests,
++  caches, overrides, symlink handling, and cleanup boundaries.
++- Host systemd active-state and real process checks remain pending because the
++  worker sandbox cannot inspect the host systemd manager or real bridge process.
+diff --git a/docs/DIRECTORY_BOUNDARY_AUDIT_2026-10-11.md b/docs/DIRECTORY_BOUNDARY_AUDIT_2026-10-11.md
+new file mode 100644
+index 0000000..1d2bccc
+--- /dev/null
++++ b/docs/DIRECTORY_BOUNDARY_AUDIT_2026-10-11.md
+@@ -0,0 +1,94 @@
++# Credential Inventory and Directory Boundary Audit, 2026-10-11
++
++Assignment scope: private credential inventory plus sanitized directory-boundary
++audit. No code, runtime configuration, service state, permissions, credential
++stores, production data, live provider calls, Git history, commits, pushes, or
++authentication state were changed. The only non-document edit was adding the
++approved repository-root `/private/` ignore rule.
++
++## Timing
++
++- Time source: shell `date` in America/New_York; duration below uses the first
++  captured audit timestamp and final validation timestamp.
++- First captured audit timestamp: 2026-10-11 17:11:50 -0400 EDT
++  (2026-10-11 21:11:50 UTC).
++- Inspection/documentation validation completed: 2026-10-11 17:13:47 -0400 EDT
++  (2026-10-11 21:13:47 UTC).
++- End: 2026-10-11 17:13:47 -0400 EDT, before final status return.
++- Elapsed duration by captured timestamps: 1 minute 57 seconds.
++- Limit: initial exploratory commands began before the first captured timestamp;
++  their exact wall-clock start was not independently recorded.
++
++## Private Inventory Status
++
++- Status: Complete for source/configuration/metadata-supported inventory.
++- `private/` was absent at the initial check, so there were no existing private
++  notes or tracked private contents to inspect.
++- The exact `/private/` rule was added to `.gitignore` while preserving existing
++  rules, including the preexisting `private/` rule.
++- The created `private/` directory resolved inside this checkout and was a normal
++  directory, not a symlink redirect.
++- A private credential inventory/recovery note was created under `private/` after
++  the ignore and location checks. Its contents are intentionally excluded from
++  this public report and outbound artifacts.
++- Final checks confirmed the private note is ignored and no `private/` path is
++  tracked by Git.
++- No credential values, auth headers, provider calls, login/refresh commands, or
++  secret-bearing file contents were read or copied.
++
++Inventory count: five credential/procedure records, covering local MCP bearer
++authentication, optional Claude provider authentication, Codex ChatGPT saved
++login, the bridge-owned Codex refresh cache, and the local MCP header helper.
++Unverified facts remain for protected-store file metadata and provider account
++state because those checks would require credential-store or live-provider
++access outside this assignment.
++
++## Directory Audit Status
++
++Status: Complete for repository source, public documentation, accessible
++filesystem metadata, and deterministic local path-resolution evidence. Host
++systemd active-state and real process checks remain pending from the prior
++sandbox limitation and were not re-debugged.
++
++| Category | Purpose and source | Resolved destination | Root/exception | Accessible evidence | Verdict |
++| --- | --- | --- | --- | --- | --- |
++| Transcripts, index, database | Consultation history from `bridge_paths.py` and `claude_bridge.py` | Checkout `transcripts/` by default; override must resolve under approved roots | `/home/jachee/projects` or approved Codex root | Existing directory resolved inside checkout, mode `0700`; source wraps database and exports with approved-path checks | Supported; override safety covered by source/tests, live override not exercised |
++| Job records | Durable worker state from `project_jobs.py` | Checkout `job-data/` by default | `/home/jachee/projects` | Directory metadata visible but contents denied by sandbox profile; source uses approved-path checks and private JSON writes | Supported for destination; contents intentionally not inspected |
++| Isolated worker homes and scratch | Per-job child home, auth copy, launch/result schema, stdout capture | Per-job subdirectory below job state; worker `TMPDIR` points at checkout `.tmp/` | `/home/jachee/projects` | Source shows state dir denial to child, isolated child home removal, private process launcher, resource limits | Supported by source/tests; host process facts pending |
++| Consultation temp homes/workdirs | Ephemeral Codex CLI home and empty workdir | Checkout `.tmp/` | `/home/jachee/projects` | Existing `.tmp/` resolved inside checkout, mode `0700`; source rejects symlink escape and creates `0700` | Supported |
++| Inbound transfers | Byte-preserving upload store | Projects-root transfer directory | `/home/jachee/projects` | Directory absent in this sandbox; source requires root under projects and creates via no-follow ancestor pinning | Supported by source/tests; live store metadata absent here |
++| Outbound transfers and artifact publication | Sanitized result/artifact retrieval store | Projects-root transfer directory | `/home/jachee/projects` | Directory absent in this sandbox; source validates artifact relative paths and reserved names | Supported by source/tests; live store metadata absent here |
++| Staged worker inputs | Read-only active-job input exposure | Checkout `.worker-inputs/` | `/home/jachee/projects` | Existing directory resolved inside checkout, mode `0700`; source clears before/after active jobs | Supported; no other job private contents inspected |
++| Test fixtures and disposable checkouts | Unit-test temp roots, transfer/job test stores | Checkout `.tmp/` in tests | `/home/jachee/projects` | Tests use project `.tmp/`; source does not rely on global `/tmp` for bridge temp roots | Supported |
++| Cache and auth overrides | Transcript dir and Codex refresh cache path controls | Approved roots only | `/home/jachee/projects` or approved Codex root | Source rejects path escapes and source/cache collision; protected Codex root metadata not visible here | Supported by source/tests; protected-store metadata pending |
++| Cleanup targets | Pending transfers, worker inputs, temporary homes, failed auth temps | Transfer roots, `.worker-inputs/`, `.tmp/`, protected cache parent | Approved roots | Source cleanup is bounded to pinned directories or explicit temp files; tests cover cleanup and symlink rejection | Supported; no production cleanup performed |
++| Service/drop-in path settings | Installed launch boundary | Repository template; installed service checked in prior reconciliation | Systemd registration exception under `/etc/systemd/system`; logging exception via journal | Prior pass found unit/template agreement but active host manager/process facts blocked | Partially supported; host active-state and process revision pending |
++
++## Findings
++
++- No boundary violation was found in source-defined write roots. Runtime and test
++  paths resolve under `/home/jachee/projects` or the approved Codex root, with
++  the documented systemd and journal exceptions.
++- The new exact `/private/` ignore rule is present. The preexisting `private/`
++  rule was preserved.
++- The protected Codex root was not visible in this worker sandbox, so credential
++  store metadata, actual helper metadata, cache freshness, provider account
++  ownership, and live login state remain unknown.
++- The visible denied `job-data/...` shell startup and Git config warnings are
++  sandbox artifacts from this worker environment. They were not treated as host
++  write evidence and were not bypassed.
++- The worker sandbox can expose synthetic namespace paths; a visible path inside
++  that namespace is not, by itself, proof of an outside host write. Evidence was
++  limited to source, tests, and accessible metadata.
++
++## Follow-Up
++
++- Re-run sanitized host systemd/process checks from a context that can see the
++  real systemd manager and bridge process. Keep MainPID, active-state,
++  process-working-directory, command-line, and loaded-source revision pending
++  until then.
++- Verify protected credential-store metadata and recovery steps only under
++  separate authority that permits credential-store inspection without printing
++  secret values.
++- Continue to keep private inventory notes and credential-bearing logs out of
++  outbound transfers and public reports.

@@ -79,4 +79,5 @@ docker-compose.override.yml
 transcripts/
 job-data/
 .worker-inputs/
+/private/
 private/

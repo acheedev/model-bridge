@@ -1,6 +1,6 @@
 # Model Bridge
 
-An authenticated, loopback-only MCP service for independent Claude/Codex
+An authenticated, loopback-only MCP service for independent Claude/Codex/Gemini
 consultations, readable transcripts, byte-preserving file transfers, and
 explicitly authorized project jobs.
 

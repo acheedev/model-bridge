@@ -5,10 +5,12 @@ Track remaining work in the [project checklist](TASKS.md). Run the commands in
 this guide from the checkout root; Python entry points now use `-m model_bridge...`.
 
 A loopback-only authenticated MCP server with `bridge_ping`, `ask_claude`,
-`ask_codex`, and `save_synthesis`. It runs as an ordinary Python process; VS Code
-is not required. The existing Claude tool uses Anthropic API credits. The Codex
-tool uses the installed CLI and saved ChatGPT subscription login, without an
-OpenAI API key or API-key billing. ChatGPT plan usage limits still apply.
+`ask_codex`, `ask_gemini`, and `save_synthesis`. It runs as an ordinary Python
+process; VS Code is not required. The existing Claude tool uses Anthropic API
+credits. The Codex tool uses the installed CLI and saved ChatGPT subscription
+login, without an OpenAI API key or API-key billing. The Gemini tool uses the
+official `google-genai` SDK with a Gemini Developer API key from the protected
+bridge keystore. ChatGPT plan usage limits still apply.
 
 Reusable byte-preserving file transfer and a separate authorized implementation
 worker are now available. See [MCP_PROJECT_WORK.md](MCP_PROJECT_WORK.md) for the
@@ -83,11 +85,25 @@ The bridge currently supports saved **file** authentication at
 `${CODEX_HOME:-$HOME/.codex}/auth.json`. Keyring-only and external-token login
 are rejected clearly; they do not fall back to API keys. No OpenAI key is needed.
 `~/.codex/model-bridge/anthropic.key` remains optional at startup: when present,
-Claude retains its existing API behavior; when absent, Codex and local tools can
-still run, while `ask_claude` reports that it is not initialized. Python requires
-3.10+ and the existing `mcp`, `anthropic`, and `uvicorn` dependencies.
+Claude retains its existing API behavior; when absent, Codex, Gemini, and local
+tools can still run, while `ask_claude` reports that it is not initialized.
+`~/.codex/model-bridge/gemini.key` is optional until Gemini activation; when it
+is absent or `google-genai` is not installed, `ask_gemini` returns a sanitized
+structured error and the other tools remain available. Python requires 3.10+ and
+the existing `mcp`, `anthropic`, `google-genai`, and `uvicorn` dependencies.
 
 ## Consultations and transcripts
+
+`ask_gemini` uses the same independent/critique/open contract as `ask_claude`
+and `ask_codex`, with provider-bound thread IDs and the same transcript store.
+The default model is `gemini-2.5-flash-lite`; set `GEMINI_MODEL` to another exact
+Developer API model ID only after checking it is supported and acceptable for the
+intended cost tier. The bridge does not substitute another Gemini model. Optional
+environment limits are `GEMINI_TIMEOUT_SECONDS` (default 60, max 1800) and
+`GEMINI_MAX_OUTPUT_TOKENS` (default 1024, max 8192). The response includes
+`provider`, `model`, actual elapsed call duration, available usage metadata,
+finish reason, truncation status, bridge thread ID, and transcript path. SDK work
+runs in a bounded worker thread and is not retried automatically.
 
 `ask_codex` supports two supplied-context tasks: `task="question"` (the default)
 and `task="code_generation"`. Code generation returns the completed answer as
@@ -353,3 +369,42 @@ Consultation and capability-check temporary directories live in `.tmp/` in the p
 also receives `TMPDIR` inside its private directory. Tests explicitly create
 their temporary fixtures under the same project `.tmp/`, independent of the
 caller’s `TMPDIR`. `.tmp/` is Git-ignored.
+
+## Security and boundary audits
+
+The October 11, 2026 private credential inventory and directory-boundary audit is
+summarized in
+[DIRECTORY_BOUNDARY_AUDIT_2026-10-11.md](DIRECTORY_BOUNDARY_AUDIT_2026-10-11.md).
+The public report records status, evidence limits, and follow-up without copying
+private note contents or secret values. Keep future audit artifacts sanitized the
+same way: public reports may describe counts, checks, and unresolved questions,
+while credential procedures stay under ignored `private/`.
+
+## Gemini service model activation
+
+The source default remains `gemini-2.5-flash-lite`. For this host, the selected
+service model is explicitly `gemini-3.5-flash-lite`, using the existing
+`GEMINI_MODEL` setting. The maintained drop-in is
+[`deploy/model-bridge.service.d/20-gemini-model.conf`](../deploy/model-bridge.service.d/20-gemini-model.conf).
+It contains no credentials and preserves all other unit settings.
+
+The host SDK test and Mimi's authenticated independent-mode MCP proof passed;
+task 5.4 is complete within that initial connectivity scope. See the
+[host activation record](GEMINI_HOST_ACTIVATION_2026-10-11.md). Subsequent source
+hardening and mode/transport regressions are recorded in
+[Gemini validation](GEMINI_VALIDATION_2026-10-11.md). One host restart remains
+necessary to load those source repairs into the running service.
+
+GEMINI_TIMEOUT_SECONDS is enforced through the synchronous SDK's HTTP
+phase/inactivity timeout, not a hard whole-call deadline. SDK retry policy is
+explicitly one total attempt; automatic function calling is disabled. Provider
+MAX_TOKENS and the local character cap both flag truncated: true. Socket cleanup
+does not prove remote provider cancellation.
+
+
+Gemini's default output cap is now 2048 tokens. GEMINI_MAX_OUTPUT_TOKENS can
+explicitly override it within the unchanged 1–8192 range. The separately
+approved higher-cap critique finished normally without truncation; its complete
+response and usage are in the validation record. The running service still needs
+one host restart to load the source/default repairs; no installed configuration
+or service operation was performed by this validation.

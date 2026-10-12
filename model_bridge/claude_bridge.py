@@ -30,7 +30,7 @@ from anthropic import Anthropic
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 from pydantic import Field
-from . import codex_runner
+from . import codex_runner, gemini_runner
 from .bridge_paths import approved_path, transcript_directory
 from .bridge_runtime import Runtime, register_tools
 from .file_transfers import REQUEST_BYTES
@@ -38,6 +38,7 @@ from .file_transfers import REQUEST_BYTES
 CONFIG = approved_path(Path.home() / '.codex/model-bridge')
 DATA = transcript_directory()
 MODEL = os.environ.get('CLAUDE_MODEL', 'claude-sonnet-5-5')
+GEMINI_MODEL = gemini_runner.configured_model()
 MAX_TOKENS = int(os.environ.get('BRIDGE_MAX_TOKENS', '4096'))
 MAX_CALLS = int(os.environ.get('BRIDGE_MAX_CALLS', '20'))
 BASE = ('You are Claude, consulted by ChatGPT on behalf of the user. '
@@ -53,7 +54,10 @@ MODES = {
 LOCK = threading.RLock()
 calls = 0
 client = None
+gemini_client = None
 api_key = ''
+gemini_api_key = ''
+gemini_startup_error = None
 bridge_token = ''
 project_runtime = None
 
@@ -184,8 +188,8 @@ def check_text(*values):
     for value in values:
         if len(value) > 32000:
             raise ValueError('Each text field must be at most 32,000 characters.')
-        if any(secret and secret in value for secret in (api_key, bridge_token)):
-            raise ValueError('Input contains a bridge credential. Remove it before consulting Claude.')
+        if any(secret and secret in value for secret in (api_key, gemini_api_key, bridge_token)):
+            raise ValueError('Input contains a bridge credential. Remove it before consulting a provider.')
 
 
 mcp = FastMCP('model-bridge', host='127.0.0.1', port=8081,
@@ -199,7 +203,7 @@ def get_project_runtime():
 
 
 def runtime_secrets():
-    values = [api_key, bridge_token]
+    values = [api_key, gemini_api_key, bridge_token]
     try:
         auth = codex_runner.subscription_auth()
         values += codex_runner.secret_values(auth)
@@ -216,7 +220,7 @@ register_tools(mcp, get_project_runtime)
 def bridge_ping(message: str = 'bridge check') -> dict:
     """Check the authenticated bridge without a paid Claude request."""
     check_text(message)
-    return {'status': 'ok', 'echo': message, 'model': MODEL}
+    return {'status': 'ok', 'echo': message, 'model': MODEL, 'gemini_model': GEMINI_MODEL}
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, openWorldHint=True))
@@ -365,6 +369,61 @@ def ask_codex(question: str, mode: Literal['independent', 'critique', 'open'] = 
         LOCK.release()
 
 
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, openWorldHint=True))
+def ask_gemini(question: str, mode: Literal['independent', 'critique', 'open'] = 'independent',
+               context: str = '', other_answer: str = '', thread_id: str = '',
+               title: str | None = None) -> dict:
+    """Consult Gemini through the Developer API using the common contract.
+
+    Independent starts fresh without thread_id or other_answer. Critique requires
+    a Gemini thread_id and other_answer; open requires a Gemini thread_id.
+    Returns Gemini text, configured model, available usage, finish reason, call
+    duration, truncation status and transcript path. No project access or tools.
+    """
+    check_text(question, context, other_answer)
+    title = validate_title(title)
+    if not question.strip() or mode not in MODES:
+        raise ValueError('A question and valid mode are required.')
+    if mode == 'independent' and (thread_id or other_answer):
+        raise ValueError('Independent mode must start fresh without thread_id or other_answer.')
+    if mode != 'independent' and not thread_id:
+        raise ValueError('Critique and open modes require a Gemini thread_id.')
+    if mode == 'critique' and not other_answer.strip():
+        raise ValueError('Critique requires other_answer.')
+    if gemini_client is None:
+        error = gemini_startup_error or {'code': 'credentials_unavailable',
+                                         'message': 'Gemini API key is not configured for this bridge.'}
+        return {'status': 'error', 'provider': 'gemini', 'model': GEMINI_MODEL,
+                'error': error}
+    with LOCK, closing(connect()) as con:
+        messages = load_thread(con, thread_id, provider='gemini') if thread_id else []
+        messages.append({'role': 'user', 'content': json.dumps(
+            {'question': question, 'context': context, 'chatgpt_answer': other_answer}, ensure_ascii=False)})
+        if len(json.dumps(messages)) > 100000:
+            raise ValueError('Thread exceeds the input cap. Start a new discussion with a summary.')
+        if not thread_id:
+            thread_id = create_thread(con, 'gemini', title)
+        call_id = uuid.uuid4().hex
+        system = BASE.replace('Claude', 'Gemini') + '\n\n' + MODES[mode]
+        contents = json.dumps(messages, ensure_ascii=False)
+        request = {'model': GEMINI_MODEL, 'system_instruction': system,
+                   'contents': contents, 'max_output_tokens': gemini_runner.max_output_tokens(),
+                   'timeout_seconds': gemini_runner.timeout_seconds()}
+        event(con, thread_id, 'request', call_id=call_id, provider='gemini', mode=mode, request=request)
+        export(con, thread_id)
+        response = gemini_runner.generate(gemini_client, model=GEMINI_MODEL,
+                                          system_instruction=system, contents=contents)
+        if response['status'] == 'ok':
+            messages.append({'role': 'assistant', 'content': response['text']})
+            con.execute('UPDATE threads SET messages=? WHERE id=?', (json.dumps(messages, ensure_ascii=False), thread_id))
+        event(con, thread_id, 'response' if response['status'] == 'ok' else 'error',
+              call_id=call_id, provider='gemini', response=response)
+        path = export(con, thread_id)
+        public = {k: v for k, v in response.items() if k != 'response'}
+        return {**public, 'thread_id': thread_id, 'mode': mode, 'provider': 'gemini',
+                'transcript': path}
+
+
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, openWorldHint=False))
 def save_synthesis(thread_id: str, answer: str, author_model: str = 'ChatGPT (unspecified)') -> dict:
     """Save ChatGPT's final synthesis to the local transcript without another API call.
@@ -422,7 +481,7 @@ class BearerGate:
 
 
 def initialize(project_tools=False):
-    global client, api_key, bridge_token, project_runtime
+    global client, gemini_client, api_key, gemini_api_key, gemini_startup_error, bridge_token, project_runtime
     os.umask(0o077)
     if not 1 <= MAX_TOKENS <= 4096 or MAX_CALLS < 1:
         raise ValueError('Invalid token or call limit.')
@@ -430,6 +489,8 @@ def initialize(project_tools=False):
         raise RuntimeError('Bridge startup is disabled in Codex child runs.')
     key_path = approved_path(CONFIG / 'anthropic.key')
     api_key = key_path.read_text().strip() if key_path.exists() else ''
+    gemini_key_path = approved_path(os.environ.get('GEMINI_API_KEY_FILE', str(CONFIG / 'gemini.key')))
+    gemini_api_key = gemini_key_path.read_text().strip() if gemini_key_path.exists() else ''
     bridge_token = approved_path(CONFIG / 'bridge.token').read_text().strip()
     if len(bridge_token) < 32:
         raise ValueError('Invalid bridge token.')
@@ -439,6 +500,15 @@ def initialize(project_tools=False):
     with LOCK, closing(connect()) as con:
         export_index(con)
     client = Anthropic(api_key=api_key, timeout=60.0, max_retries=0) if api_key else None
+    gemini_startup_error = None
+    if gemini_api_key:
+        try:
+            gemini_client = gemini_runner.make_client(gemini_api_key)
+        except gemini_runner.GeminiFailure as exc:
+            gemini_client = None
+            gemini_startup_error = exc.error
+    else:
+        gemini_client = None
     if project_tools:
         project_runtime = Runtime(runtime_secrets)
     return BearerGate(mcp.streamable_http_app(), bridge_token)

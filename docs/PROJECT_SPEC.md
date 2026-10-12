@@ -62,11 +62,16 @@ This worker capability was added before the planned baseline-closeout merge.
 That sequencing is now historical fact, not a reason to treat all later roadmap
 items as complete.
 
-Reported but not independently revalidated in this documentation-only merge:
-the bridge runs as a systemd service in Ubuntu WSL2, the service is enabled for
-distribution startup, and authenticated `bridge_ping` succeeded after migration.
-Availability after closing terminals, Windows reboot behavior, and Windows power
-settings still need explicit verification.
+Observed after the layout update: the installed Ubuntu systemd service was
+reported updated and separately spot-validated as enabled, active, running the
+new module entry point, and accepting authenticated `bridge_ping`; see
+[validation](VALIDATION.md#systemd-service-validation). A post-restructure
+authenticated ping also exposed all 11 tool schemas, including the seven
+transfer/project tools. This proves reachability and schema exposure, not
+installed-unit/source reconciliation, fresh transfer roundtrip, live
+cancellation/recovery, worker execution, or provider login. Availability after
+closing terminals, startup before Windows sign-in, uninterrupted uptime, and
+Windows power settings still need explicit verification.
 
 ## 4. Current worker-transfer capability
 
@@ -116,19 +121,22 @@ Approved baseline-closeout work:
   `/etc/systemd/system` and logging through the system journal.
 - Check the working tree, service checkout, running revision, service startup,
   and authenticated MCP access. Record validation results and timestamps before
-  reviewing and merging the baseline.
-- Reconcile the feature branch with current main, review, and push only under
-  explicit Git authority.
+  treating the baseline as closed.
+- Preserve the reported historical Git closeout separately from the current
+  layout. John relayed Ezra's report that `feature/codex-runner` was rebased,
+  fast-forward pushed, merged/pushed to `main` at `11a56a1`, deleted
+  locally/remotely, and left a clean tree with 91 previously passing tests.
+  Current-layout Git state still requires separate Git authority before any new
+  Git operation.
 
 Pending clarification/housekeeping for this milestone:
 
 - Section 5.2 already includes automatic Ubuntu startup and service
   startup/reboot verification, but the earlier specification did not precisely
   capture explicit `systemd` enablement and target checks.
-- The requested interactive feature-branch rebase onto current main followed by
-  an authorized push was not precisely captured in the earlier draft. Preserve
-  the planned order: finish baseline checks first, then perform Git
-  housekeeping only under separate authority.
+- The previously requested interactive feature-branch rebase is now a reported
+  historical closeout for an already deleted branch, not an unresolved future
+  step. Any new Git housekeeping still requires separate authority.
 
 ### Milestone 2: Build one useful coding loop
 
@@ -152,7 +160,10 @@ retrieval. Return promptly after accepting work instead of holding one MCP call
 open for the whole task.
 
 The current `project_submit`/status/result/cancel path is an implemented
-bootstrap for the model-bridge project only. Remaining design work includes
+bootstrap for the model-bridge project only. A historical model-driven
+documentation job and outbound artifact retrieval succeeded after an earlier
+failed job exposed an input-mount issue that was repaired. Live cancellation and
+interruption recovery remain unproved end to end. Remaining design work includes
 bounded parallelism, restart policy beyond marking interrupted jobs, dependency
 ordering across coding/review/application/validation steps, and richer recovery.
 
@@ -206,8 +217,13 @@ Next infrastructure tests:
 
 - Verify Ubuntu and authenticated MCP access after all Ubuntu terminals and
   VS Code close.
-- Check explicit `systemd` enablement and target configuration for the service.
-- Configure and verify automatic Ubuntu/service startup after a Windows reboot.
+- Reconcile explicit `systemd` enablement and target configuration with the
+  running service/source state after changes.
+- Configure and verify automatic Ubuntu/service startup before Windows sign-in.
+- Recheck automatic Ubuntu/service startup after Windows sign-in when the startup
+  mechanism changes. Historically, a Task Scheduler task under `aihub\default`
+  with interactive logon launched Ubuntu as `jachee` after PIN sign-in, and
+  authenticated bridge access was checked at 2026-10-11 01:18:20 -0400.
 - Verify Windows power settings support the required availability.
 
 Keep Oracle on Windows. Do not install another database in WSL. Verify network
@@ -296,15 +312,18 @@ roadmap as a completed implementation.
 - Job storage/state model, interrupted-work policy, concurrency limits, and
   coordinator implementation beyond the current single-project bootstrap.
 - Exact gstack components, source revision, compatibility, and adaptation scope.
-- Precise baseline Git housekeeping order, including interactive rebase/push
-  authority and evidence requirements.
+- Evidence requirements for any future Git housekeeping after the reported
+  `feature/codex-runner` closeout.
 
 ## 9. Documentation evidence and limits
 
-This merge verified the inbound file hashes and reviewed the repository README,
-`MCP_PROJECT_WORK.md`, and `MCP_TOOL_SCHEMAS.json`. It did not run live model
-consultations, inspect secrets, restart services, verify systemd state, rebase,
-commit, merge, or push.
+Historical documentation merge evidence includes verified inbound file hashes
+and review of the repository README, `MCP_PROJECT_WORK.md`, and
+`MCP_TOOL_SCHEMAS.json`. Later validation separately spot-checked the installed
+systemd service and authenticated `bridge_ping`. This specification update did
+not run live model consultations, inspect secrets, restart services, perform a
+fresh transfer roundtrip, prove live cancellation/recovery, rebase, commit,
+merge, or push.
 
 Future technical completion should verify current source/configuration, installed
 service files, running checkout, tests, credential handling, private inventory,

@@ -1,4 +1,54 @@
 {
+  "ask_gemini": {
+    "properties": {
+      "question": {
+        "title": "Question",
+        "type": "string"
+      },
+      "mode": {
+        "default": "independent",
+        "enum": [
+          "independent",
+          "critique",
+          "open"
+        ],
+        "title": "Mode",
+        "type": "string"
+      },
+      "context": {
+        "default": "",
+        "title": "Context",
+        "type": "string"
+      },
+      "other_answer": {
+        "default": "",
+        "title": "Other Answer",
+        "type": "string"
+      },
+      "thread_id": {
+        "default": "",
+        "title": "Thread Id",
+        "type": "string"
+      },
+      "title": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Title"
+      }
+    },
+    "required": [
+      "question"
+    ],
+    "title": "ask_geminiArguments",
+    "type": "object"
+  },
   "transfer_upload": {
     "$defs": {
       "TransferFile": {

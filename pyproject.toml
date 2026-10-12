@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Authenticated MCP consultations and authorized project work"
 readme = "README.md"
 requires-python = ">=3.10"
-dependencies = ["mcp>=1,<2", "anthropic", "uvicorn"]
+dependencies = ["mcp>=1,<2", "anthropic", "google-genai", "uvicorn"]
 
 [tool.setuptools.packages.find]
 include = ["model_bridge*"]

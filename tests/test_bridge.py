@@ -4,6 +4,7 @@ import os
 import signal
 import sqlite3
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -12,6 +13,7 @@ from unittest.mock import Mock, patch
 
 from model_bridge import claude_bridge as bridge
 from model_bridge import codex_runner as runner
+from model_bridge import gemini_runner
 from model_bridge import configure_mcp_timeout as client_config
 from model_bridge import bridge_paths
 
@@ -549,7 +551,10 @@ class BridgeTests(unittest.TestCase):
         self.tmp = temporary_test_directory()
         self.addCleanup(self.tmp.cleanup)
         self.data = Path(self.tmp.name)
-        for name, value in [('DATA', self.data), ('api_key', ''), ('bridge_token', ''), ('calls', 0), ('client', Mock())]:
+        for name, value in [('DATA', self.data), ('api_key', ''), ('gemini_api_key', ''),
+                            ('bridge_token', ''), ('calls', 0), ('client', Mock()),
+                            ('gemini_client', Mock()), ('gemini_startup_error', None),
+                            ('GEMINI_MODEL', 'gemini-test-model')]:
             patcher = patch.object(bridge, name, value)
             patcher.start(); self.addCleanup(patcher.stop)
         patcher = patch.dict(os.environ, {'MODEL_BRIDGE_CHILD': ''}, clear=True)
@@ -582,6 +587,55 @@ class BridgeTests(unittest.TestCase):
             bridge.ask_codex('hello', mode='open', thread_id='a'*32)
         with self.assertRaisesRegex(ValueError, 'different provider'):
             bridge.ask_claude('hello', mode='open', thread_id=a['thread_id'])
+
+    def test_gemini_modes_history_usage_finish_and_provider_isolation(self):
+        with patch.object(gemini_runner, 'generate', return_value={
+            'status': 'ok', 'text': 'Gemini answer', 'model': 'gemini-test-model',
+            'usage': {'prompt_token_count': 3, 'candidates_token_count': 4, 'thoughts_token_count': 1},
+            'finish_reason': 'STOP', 'elapsed_seconds': 0.25, 'truncated': False,
+            'max_output_tokens': 1024, 'response': {'kept': 'transcript-only'},
+        }) as generate:
+            a = bridge.ask_gemini('first', context='background')
+            b = bridge.ask_gemini('unrelated')
+            bridge.ask_gemini('critique this', mode='critique', thread_id=a['thread_id'], other_answer='alternative')
+            contents = generate.call_args.kwargs['contents']
+            for text in ('first', 'background', 'Gemini answer', 'alternative'):
+                self.assertIn(text, contents)
+            self.assertNotIn('unrelated', contents)
+            bridge.ask_gemini('continue', mode='open', thread_id=b['thread_id'])
+        self.assertEqual(a['provider'], 'gemini')
+        self.assertEqual(a['model'], 'gemini-test-model')
+        self.assertEqual(a['usage']['thoughts_token_count'], 1)
+        self.assertEqual(a['finish_reason'], 'STOP')
+        self.assertEqual(a['elapsed_seconds'], 0.25)
+        self.assertFalse(a['truncated'])
+        self.assertNotIn('response', a)
+        document = json.loads(Path(a['transcript']).with_suffix('.json').read_text())
+        self.assertEqual(document['provider'], 'gemini')
+        self.assertEqual([e['kind'] for e in document['events']], ['request', 'response', 'request', 'response'])
+        self.assertEqual(document['events'][1]['response']['response']['kept'], 'transcript-only')
+        with self.assertRaisesRegex(ValueError, 'different provider'):
+            bridge.ask_codex('hello', mode='open', thread_id=a['thread_id'])
+        with self.assertRaisesRegex(ValueError, 'different provider'):
+            bridge.ask_claude('hello', mode='open', thread_id=a['thread_id'])
+
+    def test_gemini_independent_missing_credentials_and_failed_history(self):
+        with patch.object(bridge, 'gemini_client', None):
+            result = bridge.ask_gemini('hello')
+        self.assertEqual(result['error']['code'], 'credentials_unavailable')
+        self.assertEqual(list(self.data.iterdir()), [])
+        with patch.object(gemini_runner, 'generate', return_value={
+            'status': 'error', 'model': 'gemini-test-model', 'elapsed_seconds': 1.0,
+            'error': {'code': 'timeout', 'message': 'Gemini request timed out. No automatic retry.'},
+        }):
+            response = bridge.ask_gemini('question')
+        self.assertEqual(response['error']['code'], 'timeout')
+        document = json.loads(Path(response['transcript']).with_suffix('.json').read_text())
+        self.assertEqual([e['kind'] for e in document['events']], ['request', 'error'])
+        with bridge.connect() as con:
+            self.assertEqual(bridge.load_thread(con, response['thread_id'], 'gemini'), [])
+        with self.assertRaises(ValueError):
+            bridge.ask_gemini('question', mode='independent', other_answer='must not leak')
 
     def test_failed_request_saved_history_not_changed(self):
         self.consult.return_value = {'status': 'error', 'error': {'code': 'timeout'}}
@@ -713,9 +767,9 @@ class BridgeTests(unittest.TestCase):
     def test_mcp_registration(self):
         tools = asyncio.run(bridge.mcp.list_tools())
         names = {tool.name for tool in tools}
-        self.assertTrue({'ask_codex', 'ask_claude', 'bridge_ping', 'save_synthesis'} <= names)
+        self.assertTrue({'ask_codex', 'ask_claude', 'ask_gemini', 'bridge_ping', 'save_synthesis'} <= names)
         for tool in tools:
-            if tool.name in ('ask_codex', 'ask_claude'):
+            if tool.name in ('ask_codex', 'ask_claude', 'ask_gemini'):
                 self.assertIn('title', tool.inputSchema['properties'])
                 self.assertNotIn('title', tool.inputSchema.get('required', []))
 
@@ -729,30 +783,36 @@ class BridgeTests(unittest.TestCase):
 
     def test_readable_paths_stable_across_followups_synthesis_and_reconnect(self):
         self.claude_response()
-        for provider, ask in (('codex', bridge.ask_codex), ('claude', bridge.ask_claude)):
-            with patch.object(bridge, 'now', return_value='2026-10-10T13:30:00+00:00'):
-                first = ask('RAW PROMPT MUST NOT BE A FILENAME', title='Python helper')
-            thread, path = first['thread_id'], Path(first['transcript'])
-            self.assertEqual(len(thread), 32)
-            self.assertEqual(path.name, f'2026-10-10_09-30-00-0400_{provider}_python-helper_{thread[:8]}.md')
-            # A later title and a different date must not rename a thread.
-            with patch.object(bridge, 'now', return_value='2026-12-12T15:00:00+00:00'):
-                followup = ask('continue', mode='open', thread_id=thread, title='Different title')
-                synthesis = bridge.save_synthesis(thread, 'Final answer')
-            self.assertEqual(followup['transcript'], str(path))
-            self.assertEqual(synthesis['transcript'], str(path))
-            with bridge.connect() as con:
-                self.assertEqual(bridge.export(con, thread), str(path))
-            document = json.loads(path.with_suffix('.json').read_text())
-            self.assertEqual(document['thread_id'], thread)
-            self.assertEqual(document['title'], 'Python helper')
-            self.assertEqual(document['started_at'], '2026-10-10T13:30:00+00:00')
-            self.assertEqual(len(document['events']), 5)
-            index = (self.data / 'index.md').read_text()
-            for text in (thread, provider, 'Python helper', '2026-10-10T09:30:00-04:00', path.name):
-                self.assertIn(text, index)
-            self.assertNotIn('RAW PROMPT', index)
-            self.assertNotIn('Different title', index)
+        with patch.object(gemini_runner, 'generate', return_value={
+            'status': 'ok', 'text': 'Gemini answer', 'model': 'gemini-test-model',
+            'usage': None, 'finish_reason': 'STOP', 'elapsed_seconds': 0.1,
+            'truncated': False, 'max_output_tokens': 1024, 'response': {},
+        }):
+            providers = (('codex', bridge.ask_codex), ('claude', bridge.ask_claude), ('gemini', bridge.ask_gemini))
+            for provider, ask in providers:
+                with patch.object(bridge, 'now', return_value='2026-10-10T13:30:00+00:00'):
+                    first = ask('RAW PROMPT MUST NOT BE A FILENAME', title='Python helper')
+                thread, path = first['thread_id'], Path(first['transcript'])
+                self.assertEqual(len(thread), 32)
+                self.assertEqual(path.name, f'2026-10-10_09-30-00-0400_{provider}_python-helper_{thread[:8]}.md')
+                # A later title and a different date must not rename a thread.
+                with patch.object(bridge, 'now', return_value='2026-12-12T15:00:00+00:00'):
+                    followup = ask('continue', mode='open', thread_id=thread, title='Different title')
+                    synthesis = bridge.save_synthesis(thread, 'Final answer')
+                self.assertEqual(followup['transcript'], str(path))
+                self.assertEqual(synthesis['transcript'], str(path))
+                with bridge.connect() as con:
+                    self.assertEqual(bridge.export(con, thread), str(path))
+                document = json.loads(path.with_suffix('.json').read_text())
+                self.assertEqual(document['thread_id'], thread)
+                self.assertEqual(document['title'], 'Python helper')
+                self.assertEqual(document['started_at'], '2026-10-10T13:30:00+00:00')
+                self.assertEqual(len(document['events']), 5)
+                index = (self.data / 'index.md').read_text()
+                for text in (thread, provider, 'Python helper', '2026-10-10T09:30:00-04:00', path.name):
+                    self.assertIn(text, index)
+                self.assertNotIn('RAW PROMPT', index)
+                self.assertNotIn('Different title', index)
 
     def test_sanitization_defaults_and_index_escaping(self):
         for title, slug in ((None, 'consultation'), ('', 'consultation'), ('../..\\/?!', 'consultation'),
@@ -774,7 +834,7 @@ class BridgeTests(unittest.TestCase):
 
     def test_title_credentials_and_length_rejected_before_consultation(self):
         self.claude_response()
-        for ask in (bridge.ask_codex, bridge.ask_claude):
+        for ask in (bridge.ask_codex, bridge.ask_claude, bridge.ask_gemini):
             for kwargs in ({'title': 'x'*201}, {'title': 123}):
                 with self.assertRaises(ValueError): ask('question', **kwargs)
             with patch.object(bridge, 'bridge_token', 'bridge-secret'):
@@ -877,6 +937,83 @@ class BridgeTests(unittest.TestCase):
             app = bridge.initialize()
         self.assertIsInstance(app, bridge.BearerGate)
         self.assertIsNone(bridge.client)
+
+    def test_gemini_sdk_startup_error_does_not_break_existing_tools(self):
+        (self.data / 'bridge.token').write_text('b'*32)
+        (self.data / 'gemini.key').write_text('private-gemini-key')
+        with patch.object(bridge, 'CONFIG', self.data), patch.object(gemini_runner, 'make_client') as make_client:
+            make_client.side_effect = gemini_runner.GeminiFailure('sdk_unavailable', 'Install google-genai.')
+            app = bridge.initialize()
+        self.assertIsInstance(app, bridge.BearerGate)
+        self.assertEqual(bridge.bridge_ping()['status'], 'ok')
+        result = bridge.ask_gemini('hello')
+        self.assertEqual(result['error']['code'], 'sdk_unavailable')
+        self.assertNotIn('private-gemini-key', json.dumps(result))
+
+
+class GeminiRunnerTests(unittest.TestCase):
+    def setUp(self):
+        self.env = patch.dict(os.environ, {}, clear=True)
+        self.env.start()
+        self.addCleanup(self.env.stop)
+
+    def test_make_client_missing_credentials_and_sdk(self):
+        with self.assertRaises(gemini_runner.GeminiFailure) as failure:
+            gemini_runner.make_client('')
+        self.assertEqual(failure.exception.error['code'], 'credentials_unavailable')
+        with patch.dict(sys.modules, {'google.genai': None}):
+            with self.assertRaises(gemini_runner.GeminiFailure) as failure:
+                gemini_runner.make_client('secret-key')
+        self.assertEqual(failure.exception.error['code'], 'sdk_unavailable')
+
+    def test_generate_success_usage_finish_and_truncation(self):
+        huge = 'x' * (gemini_runner.MAX_OUTPUT_CHARS + 3)
+        response = SimpleNamespace(
+            text=huge,
+            usage_metadata=SimpleNamespace(model_dump=lambda: {
+                'prompt_token_count': 1, 'candidates_token_count': 2, 'thoughts_token_count': 3}),
+            candidates=[SimpleNamespace(finish_reason=SimpleNamespace(name='MAX_TOKENS'))],
+        )
+        client = SimpleNamespace(models=SimpleNamespace(generate_content=Mock(return_value=response)))
+        result = gemini_runner.generate(client, model='gemini-test', system_instruction='sys', contents='body', timeout=1)
+        self.assertEqual(result['status'], 'ok')
+        self.assertEqual(len(result['text']), gemini_runner.MAX_OUTPUT_CHARS)
+        self.assertTrue(result['truncated'])
+        self.assertEqual(result['usage']['thoughts_token_count'], 3)
+        self.assertEqual(result['finish_reason'], 'MAX_TOKENS')
+        self.assertGreaterEqual(result['elapsed_seconds'], 0)
+        self.assertEqual(client.models.generate_content.call_args.kwargs['model'], 'gemini-test')
+
+    def test_generate_errors_timeout_and_empty_response(self):
+        class AuthError(Exception):
+            status_code = 401
+        client = SimpleNamespace(models=SimpleNamespace(generate_content=Mock(side_effect=AuthError('secret-key'))))
+        result = gemini_runner.generate(client, model='gemini-test', system_instruction='sys', contents='body', timeout=1)
+        self.assertEqual(result['error']['code'], 'authentication_failed')
+        self.assertNotIn('secret-key', json.dumps(result))
+
+        empty = SimpleNamespace(text='', usage_metadata=None, candidates=[SimpleNamespace(finish_reason='SAFETY')])
+        client = SimpleNamespace(models=SimpleNamespace(generate_content=Mock(return_value=empty)))
+        result = gemini_runner.generate(client, model='gemini-test', system_instruction='sys', contents='body', timeout=1)
+        self.assertEqual(result['error']['code'], 'blocked_or_empty_response')
+        self.assertEqual(result['finish_reason'], 'SAFETY')
+
+        client.models.generate_content.side_effect = TimeoutError('synthetic-timeout')
+        result = gemini_runner.generate(client, model='gemini-test', system_instruction='sys', contents='body', timeout=0.1)
+        self.assertEqual(result['error']['code'], 'timeout')
+
+    def test_limits_and_configuration(self):
+        for value in ('',):
+            with patch.dict(os.environ, {'GEMINI_MODEL': value}):
+                with self.assertRaises(gemini_runner.GeminiFailure):
+                    gemini_runner.configured_model()
+        for value in ('0', '1801', 'oops'):
+            with self.assertRaises(gemini_runner.GeminiFailure):
+                gemini_runner.timeout_seconds(value)
+        for value in ('0', '8193', 'oops'):
+            with patch.dict(os.environ, {'GEMINI_MAX_OUTPUT_TOKENS': value}):
+                with self.assertRaises(gemini_runner.GeminiFailure):
+                    gemini_runner.max_output_tokens()
 
 
 if __name__ == '__main__':

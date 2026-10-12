@@ -1,0 +1,49 @@
+Sanitized assignment patch summary for the Gemini connector stage.
+
+This patch is limited to the assignment-specific changes made in this worker
+run. It is intentionally not a full `git diff` against HEAD because the working
+tree already contained unrelated documentation changes before this assignment.
+
+Files changed:
+- `model_bridge/gemini_runner.py`: new helper wrapping the official
+  `google-genai` SDK client, `models.generate_content`, timeout execution,
+  bounded output, usage/finish extraction, and sanitized error classification.
+- `model_bridge/claude_bridge.py`: registers `ask_gemini`, loads
+  `~/.codex/model-bridge/gemini.key` or `GEMINI_API_KEY_FILE`, keeps Gemini
+  thread IDs provider-bound, records requests/responses in existing transcripts,
+  and leaves project-worker routing unchanged.
+- `pyproject.toml`: adds the `google-genai` dependency declaration.
+- `tests/test_bridge.py`: adds mocked Gemini connector and runner coverage for
+  mode/history separation, provider isolation, missing credentials, startup SDK
+  failure, sanitized errors, timeout handling, usage/finish reporting, truncation,
+  and MCP registration.
+- `README.md`, `docs/OPERATIONS.md`, `docs/MCP_TOOL_SCHEMAS.json`,
+  `docs/TASKS.md`: document the new tool, activation limits, exact schema, and
+  task status.
+
+Core MCP schema added:
+
+```json
+{
+  "properties": {
+    "question": {"title": "Question", "type": "string"},
+    "mode": {
+      "default": "independent",
+      "enum": ["independent", "critique", "open"],
+      "title": "Mode",
+      "type": "string"
+    },
+    "context": {"default": "", "title": "Context", "type": "string"},
+    "other_answer": {"default": "", "title": "Other Answer", "type": "string"},
+    "thread_id": {"default": "", "title": "Thread Id", "type": "string"},
+    "title": {
+      "anyOf": [{"type": "string"}, {"type": "null"}],
+      "default": null,
+      "title": "Title"
+    }
+  },
+  "required": ["question"],
+  "title": "ask_geminiArguments",
+  "type": "object"
+}
+```
