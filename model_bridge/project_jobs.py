@@ -363,15 +363,13 @@ class JobManager:
 
     def worker_settings(self, project, job_dir):
         profile = 'permissions.bridge-worker'
-        live = self.projects.get('model-bridge', PROJECT)
-        filesystem = {':root': 'deny', ':minimal': 'read', ':workspace_roots': 'deny', ':tmpdir': 'deny',
-                      ':slash_tmp': 'deny', str(live): 'deny', str(self.state_dir): 'deny',
-                      str(project): 'write', str(project / '.tmp'): 'write',
+        # The default deny already hides the live repo and all job metadata.
+        # Explicit ancestor masks (or a workspace alias resolving to this stage)
+        # prevent bwrap from building the nested stage/input mount destinations.
+        filesystem = {':root': 'deny', ':minimal': 'read', ':slash_tmp': 'deny',
+                      str(project): 'write',
                       str(job_dir / 'inputs'): 'read', str(job_dir / 'home'): 'deny',
                       str(Path(codex_runner.executable()).parent): 'read'}
-        for root in self.projects.values():
-            filesystem[str(root)] = 'deny'
-            # Dependencies must be supplied in the filtered stage; no live-repo read exceptions.
         fs_setting = profile + '.filesystem={' + ','.join(json.dumps(k) + '=' + json.dumps(v) for k, v in filesystem.items()) + '}'
         settings = ['default_permissions="bridge-worker"', 'approval_policy="never"', 'mcp_servers={}',
                     'forced_login_method="chatgpt"', 'cli_auth_credentials_store="file"', 'model_provider="openai"',

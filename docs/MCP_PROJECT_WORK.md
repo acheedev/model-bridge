@@ -122,6 +122,21 @@ same error code in `admission_error`. Diagnostics use the job's existing secret
 redaction. The historical October 13 failure did not record its offending path,
 so its exact runtime entry remains unconfirmed.
 
+The worker sandbox uses a default-deny root plus exact stage-write and input-read
+grants. Do not add explicit deny mounts for ancestors of those grants, or a
+`:workspace_roots=deny` alias resolving to the stage: the installed Bubblewrap
+backend cannot construct those overlapping mounts. The scratch directory inherits
+the stage's write grant. Real live-repo/job/private files remain hidden by the
+default deny. Synthetic ancestor directories may be visible and accept ephemeral
+namespace files; those do not alter the host metadata tree.
+
+Run `scripts/probe_staged_sandbox.py` with `CODEX_BIN` set to the installed CLI
+for a disposable, no-model proof through the production resource launcher. It
+checks stage/scratch writes, read-only inputs, denied private reads/writes, and
+absence of host-side writes. Evidence goes under project `.tmp/`. This replaces
+the retired shared-input probe for staged workers; it does not submit a model job
+or apply changes to the live checkout.
+
 Filename filtering and known-value checks cannot identify every secret embedded
 in arbitrary content. Clients/workers must not submit or publish unknown private
 credentials. A response's intended file bytes are never silently redacted:

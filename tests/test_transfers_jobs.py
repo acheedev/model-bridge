@@ -318,8 +318,11 @@ class JobTests(unittest.TestCase):
             settings=self.manager.worker_settings(self.root/'state'/'job'/'workspace',self.root/'state'/'job')
         text='\n'.join(settings)
         self.assertIn(str(self.root/'state'/'job'/'inputs')+'"="read"',text)
-        self.assertIn(str(self.project)+'"="deny"',text)
-        self.assertIn(str(self.manager.state_dir)+'"="deny"',text)
+        self.assertNotIn(str(self.project)+'"="deny"',text)
+        self.assertNotIn(str(self.manager.state_dir)+'"="deny"',text)
+        self.assertNotIn('":workspace_roots"="deny"',text)
+        self.assertNotIn('":tmpdir"="deny"',text)
+        self.assertIn(str(self.root/'state'/'job'/'workspace')+'"="write"',text)
         for required in ('approval_policy="never"','mcp_servers={}','network.enabled=false','":root"="deny"','":slash_tmp"="deny"','features.multi_agent=false'):
             self.assertIn(required,text)
         self.assertEqual(before,codex_runner.CONFIG_OVERRIDES)
