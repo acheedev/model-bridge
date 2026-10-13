@@ -7,6 +7,8 @@ explicitly authorized project jobs.
 **Start here:** [Project checklist](docs/TASKS.md). Check off work as its stated
 completion evidence becomes available.
 
+Current staged pilot: [local delivery and remaining activation proof](docs/STAGED_PILOT_2026-10-12.md). Source changes are not yet installed-service proof.
+
 ## Project layout
 
 ```text
@@ -18,7 +20,7 @@ deploy/        Service configuration maintained in the repository
 ```
 
 Runtime data stays at the checkout root in Git-ignored `transcripts/`,
-`job-data/`, `.tmp/`, and `.worker-inputs/`. Private inventory belongs in
+`job-data/` and `.tmp/`; legacy `.worker-inputs/` remains ignored. New inputs/stages are per job under `job-data/`. Private inventory belongs in
 Git-ignored `private/`; actual credentials stay in their protected files.
 
 ## Documentation

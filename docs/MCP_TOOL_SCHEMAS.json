@@ -1,54 +1,4 @@
 {
-  "ask_gemini": {
-    "properties": {
-      "question": {
-        "title": "Question",
-        "type": "string"
-      },
-      "mode": {
-        "default": "independent",
-        "enum": [
-          "independent",
-          "critique",
-          "open"
-        ],
-        "title": "Mode",
-        "type": "string"
-      },
-      "context": {
-        "default": "",
-        "title": "Context",
-        "type": "string"
-      },
-      "other_answer": {
-        "default": "",
-        "title": "Other Answer",
-        "type": "string"
-      },
-      "thread_id": {
-        "default": "",
-        "title": "Thread Id",
-        "type": "string"
-      },
-      "title": {
-        "anyOf": [
-          {
-            "type": "string"
-          },
-          {
-            "type": "null"
-          }
-        ],
-        "default": null,
-        "title": "Title"
-      }
-    },
-    "required": [
-      "question"
-    ],
-    "title": "ask_geminiArguments",
-    "type": "object"
-  },
   "transfer_upload": {
     "$defs": {
       "TransferFile": {
@@ -212,9 +162,51 @@
         "type": "integer"
       },
       "cpu_seconds": {
-        "default": 600,
+        "default": 300,
         "title": "Cpu Seconds",
         "type": "integer"
+      },
+      "target_paths": {
+        "anyOf": [
+          {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Target Paths"
+      },
+      "idempotency_key": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Idempotency Key"
+      },
+      "dependency_job_ids": {
+        "anyOf": [
+          {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Dependency Job Ids"
       }
     },
     "required": [
@@ -263,6 +255,339 @@
       "job_id"
     ],
     "title": "project_cancelArguments",
+    "type": "object"
+  },
+  "project_apply": {
+    "$defs": {
+      "ApplyAuthority": {
+        "additionalProperties": false,
+        "properties": {
+          "apply": {
+            "title": "Apply",
+            "type": "boolean"
+          },
+          "test": {
+            "title": "Test",
+            "type": "boolean"
+          },
+          "commit": {
+            "title": "Commit",
+            "type": "boolean"
+          },
+          "push": {
+            "title": "Push",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "apply",
+          "test",
+          "commit",
+          "push"
+        ],
+        "title": "ApplyAuthority",
+        "type": "object"
+      }
+    },
+    "properties": {
+      "job_id": {
+        "title": "Job Id",
+        "type": "string"
+      },
+      "bundle_hash": {
+        "title": "Bundle Hash",
+        "type": "string"
+      },
+      "base_hash": {
+        "title": "Base Hash",
+        "type": "string"
+      },
+      "authority": {
+        "$ref": "#/$defs/ApplyAuthority"
+      }
+    },
+    "required": [
+      "job_id",
+      "bundle_hash",
+      "base_hash",
+      "authority"
+    ],
+    "title": "project_applyArguments",
+    "type": "object"
+  },
+  "project_review": {
+    "properties": {
+      "job_id": {
+        "title": "Job Id",
+        "type": "string"
+      },
+      "pinned": {
+        "default": false,
+        "title": "Pinned",
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "job_id"
+    ],
+    "title": "project_reviewArguments",
+    "type": "object"
+  },
+  "project_retention": {
+    "properties": {
+      "apply": {
+        "default": false,
+        "title": "Apply",
+        "type": "boolean"
+      },
+      "job_ids": {
+        "anyOf": [
+          {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Job Ids"
+      }
+    },
+    "title": "project_retentionArguments",
+    "type": "object"
+  },
+  "bridge_ping": {
+    "properties": {
+      "message": {
+        "default": "bridge check",
+        "title": "Message",
+        "type": "string"
+      }
+    },
+    "title": "bridge_pingArguments",
+    "type": "object"
+  },
+  "ask_claude": {
+    "properties": {
+      "question": {
+        "title": "Question",
+        "type": "string"
+      },
+      "mode": {
+        "default": "independent",
+        "enum": [
+          "independent",
+          "critique",
+          "open"
+        ],
+        "title": "Mode",
+        "type": "string"
+      },
+      "context": {
+        "default": "",
+        "title": "Context",
+        "type": "string"
+      },
+      "other_answer": {
+        "default": "",
+        "title": "Other Answer",
+        "type": "string"
+      },
+      "thread_id": {
+        "default": "",
+        "title": "Thread Id",
+        "type": "string"
+      },
+      "title": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Title"
+      }
+    },
+    "required": [
+      "question"
+    ],
+    "title": "ask_claudeArguments",
+    "type": "object"
+  },
+  "ask_codex": {
+    "properties": {
+      "question": {
+        "title": "Question",
+        "type": "string"
+      },
+      "mode": {
+        "default": "independent",
+        "enum": [
+          "independent",
+          "critique",
+          "open"
+        ],
+        "title": "Mode",
+        "type": "string"
+      },
+      "context": {
+        "default": "",
+        "title": "Context",
+        "type": "string"
+      },
+      "other_answer": {
+        "default": "",
+        "title": "Other Answer",
+        "type": "string"
+      },
+      "thread_id": {
+        "default": "",
+        "title": "Thread Id",
+        "type": "string"
+      },
+      "task": {
+        "default": "question",
+        "enum": [
+          "question",
+          "code_generation"
+        ],
+        "title": "Task",
+        "type": "string"
+      },
+      "model": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Model"
+      },
+      "reasoning_effort": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Reasoning Effort"
+      },
+      "timeout_seconds": {
+        "anyOf": [
+          {
+            "exclusiveMinimum": 0,
+            "maximum": 1800,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Timeout Seconds"
+      },
+      "title": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Title"
+      }
+    },
+    "required": [
+      "question"
+    ],
+    "title": "ask_codexArguments",
+    "type": "object"
+  },
+  "ask_gemini": {
+    "properties": {
+      "question": {
+        "title": "Question",
+        "type": "string"
+      },
+      "mode": {
+        "default": "independent",
+        "enum": [
+          "independent",
+          "critique",
+          "open"
+        ],
+        "title": "Mode",
+        "type": "string"
+      },
+      "context": {
+        "default": "",
+        "title": "Context",
+        "type": "string"
+      },
+      "other_answer": {
+        "default": "",
+        "title": "Other Answer",
+        "type": "string"
+      },
+      "thread_id": {
+        "default": "",
+        "title": "Thread Id",
+        "type": "string"
+      },
+      "title": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Title"
+      }
+    },
+    "required": [
+      "question"
+    ],
+    "title": "ask_geminiArguments",
+    "type": "object"
+  },
+  "save_synthesis": {
+    "properties": {
+      "thread_id": {
+        "title": "Thread Id",
+        "type": "string"
+      },
+      "answer": {
+        "title": "Answer",
+        "type": "string"
+      },
+      "author_model": {
+        "default": "ChatGPT (unspecified)",
+        "title": "Author Model",
+        "type": "string"
+      }
+    },
+    "required": [
+      "thread_id",
+      "answer"
+    ],
+    "title": "save_synthesisArguments",
     "type": "object"
   }
 }

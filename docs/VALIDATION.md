@@ -232,3 +232,38 @@ on that reported basis. Ping does not independently verify loaded source or
 the effective 2048-token cap. Exact checkpoint timestamps were not supplied.
 See the [detailed validation checkpoint](GEMINI_VALIDATION_2026-10-11.md#reported-restart-and-authenticated-ping-checkpoint).
 No new probes or service/code/configuration/Git operations accompanied this update.
+
+## Scoped non-model project lifecycle scaffolding and critical next brief
+
+New scripts/demo_project_lifecycle.py uses only disposable project/state/transfer
+roots under this checkout's .tmp and actual registered MCP handlers. Cancellation
+stops its fixture process group/grandchild, retains partial/unrelated files,
+records durable status/result, and verifies exact outbound bytes/hash/job state.
+An abrupt isolated supervisor exit demonstrates running/queued interruption,
+unknown stop timestamps, retained before-status/partial files, no replay, and
+acceptance/completion of a new non-model job. No production jobs were cancelled
+and no installed service restart occurred; live 4.4/4.5 proofs stay unchecked.
+
+Two new integration tests passed. Final focused run: October 11,
+23:13:42.407095–23:13:43.659126 EDT; 1.252030 monotonic subprocess seconds;
+unittest 0.973 seconds, zero failures/errors/skips. The CLI demo's two scenarios
+also passed at 23:12:34.788411–23:12:35.840858 EDT, 1.052448 monotonic seconds;
+that earlier CLI run preceded stronger readback assertions verified by the
+focused retest. No full-suite repeat was needed: production source is unchanged.
+
+3.8 integrated protection stopped at the authorized design/estimate fallback:
+current workers directly edit the target, so pre-apply protection needs staging
+and a distinct apply contract. No clean/stale patch application was claimed.
+John's accepted repo/transfer boundary and immediate-versus-advanced 4.6 split
+are recorded. Critical 4.7 has a concrete scoped implementation/proof brief and
+remains pending actual delivery, not completed by design. 4.8/4.9 stay backlog.
+
+See [proposal/evidence](PROJECT_WORK_PROPOSAL_2026-10-11.md),
+[next implementation brief](NEXT_IMPLEMENTATION_BRIEF.md), and
+[sanitized disposable demo trace](PROJECT_LIFECYCLE_DEMO_2026-10-11.json).
+No provider calls, production code/config/permission changes, real restart,
+commit, push, hour job, or broad audit accompanied this work.
+
+## October 12 staged parallel pilot
+
+132 full-suite tests passed. [Exact timings/output](STAGED_PILOT_TESTS_2026-10-12.json) and [implemented behavior, fixture scope and remaining installed proof](STAGED_PILOT_2026-10-12.md). No provider calls, production apply/restart/config changes, commits or pushes. Existing data untouched.

@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import stat
 import unicodedata
 import uuid
@@ -23,7 +24,7 @@ REQUEST_BYTES = 12 * 1024 * 1024
 RESPONSE_BYTES = 3 * 1024 * 1024
 FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
 RESERVED = {'manifest.json', 'auth.json', 'bridge.token', 'anthropic.key', 'codex-auth-cache.json',
-            '.netrc', '.npmrc', '.gitconfig', 'credentials', 'credentials.json', 'id_rsa', 'id_dsa', 'id_ecdsa', 'id_ed25519'}
+            'gemini.key', '.netrc', '.npmrc', '.gitconfig', 'credentials', 'credentials.json', 'id_rsa', 'id_dsa', 'id_ecdsa', 'id_ed25519'}
 
 
 class TransferError(ValueError):
@@ -38,7 +39,7 @@ def valid_name(name):
     if name in ('.', '..') or any(c in name for c in '/\\:') or any(ord(c) < 32 or ord(c) == 127 for c in name):
         raise TransferError('invalid_filename')
     key = unicodedata.normalize('NFC', name).casefold()
-    if key in RESERVED or key == '.env' or key.startswith('.env.') or key.endswith(('.key', '.pem', '.p12', '.pfx')):
+    if key in RESERVED or key.startswith('.env') or key.endswith(('.key', '.pem', '.p12', '.pfx')):
         raise TransferError('credential_filename_excluded')
     return key
 
@@ -107,9 +108,10 @@ def publish_directory(fd, pending, final):
 
 
 class TransferStore:
-    def __init__(self, inbound=INBOUND, outbound=OUTBOUND, secrets_provider=lambda: ()):
+    def __init__(self, inbound=INBOUND, outbound=OUTBOUND, secrets_provider=lambda: (), free_space=None):
         self.roots = {'inbound': Path(inbound), 'outbound': Path(outbound)}
         self.secrets_provider = secrets_provider
+        self.free_space = free_space or (lambda path: shutil.disk_usage(path).free)
         for root in self.roots.values():
             if not root.is_relative_to(Path('/home/jachee/projects')):
                 raise TransferError('invalid_root')
@@ -164,6 +166,8 @@ class TransferStore:
             self.check_content(data)
         if total > TOTAL_BYTES:
             raise TransferError('transfer_too_large')
+        if self.free_space(self.roots[direction]) < 1024**3 + total:
+            raise TransferError('storage_admission_blocked')
         transfer_id = uuid.uuid4().hex
         pending = '.pending-' + transfer_id
         entries = [{'filename': name, 'size_bytes': len(data), 'sha256': hashlib.sha256(data).hexdigest()} for name, data in files]

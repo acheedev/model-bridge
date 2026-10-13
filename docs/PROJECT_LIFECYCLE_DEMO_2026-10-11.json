@@ -1,0 +1,96 @@
+{
+  "status": "ok",
+  "scope": "disposable non-model registered-handler demo; not installed-service proof",
+  "started_at": "2026-10-11T23:12:34.788411-04:00",
+  "completed_at": "2026-10-11T23:12:35.840858-04:00",
+  "elapsed_seconds": 1.052448,
+  "measurement": "monotonic demo wall time",
+  "results": [
+    {
+      "scenario": "cancellation",
+      "cancelled_state_durable": true,
+      "worker_and_grandchild_stopped_or_zombie": true,
+      "partial_file_retained": true,
+      "unrelated_fixture_preserved": true,
+      "outbound_readback": true,
+      "queued_successor_succeeded": true,
+      "calls": [
+        {
+          "tool": "project_submit",
+          "job_id": "fa854505511a4d499d0fc0b3ecb24be8",
+          "state": "queued"
+        },
+        {
+          "tool": "project_submit",
+          "job_id": "034ec0cfc59342178268827a38e2e246",
+          "state": "queued"
+        },
+        {
+          "tool": "project_status",
+          "job_id": "034ec0cfc59342178268827a38e2e246",
+          "state": "queued"
+        },
+        {
+          "tool": "project_cancel",
+          "job_id": "fa854505511a4d499d0fc0b3ecb24be8",
+          "state": "running"
+        },
+        {
+          "tool": "project_status",
+          "job_id": "fa854505511a4d499d0fc0b3ecb24be8",
+          "state": "cancelled"
+        },
+        {
+          "tool": "project_result",
+          "job_id": "fa854505511a4d499d0fc0b3ecb24be8",
+          "state": "cancelled"
+        },
+        {
+          "tool": "transfer_manifest",
+          "job_id": null,
+          "state": "complete"
+        },
+        {
+          "tool": "transfer_read",
+          "job_id": null,
+          "state": null
+        },
+        {
+          "tool": "project_cancel",
+          "job_id": "fa854505511a4d499d0fc0b3ecb24be8",
+          "state": "cancelled"
+        }
+      ]
+    },
+    {
+      "scenario": "isolated_crash_recovery",
+      "running_and_queued_interrupted": true,
+      "exact_stop_time_unknown": true,
+      "partial_file_and_before_status_retained": true,
+      "automatic_replay": false,
+      "new_job_accepted_and_succeeded": true,
+      "calls": [
+        {
+          "tool": "project_result",
+          "job_id": "b2d70bf244d0489e846bff4b002bd30b",
+          "state": "interrupted"
+        },
+        {
+          "tool": "project_result",
+          "job_id": "3548da73cd624104bf81632fc9716999",
+          "state": "interrupted"
+        },
+        {
+          "tool": "project_submit",
+          "job_id": "17ee0e94e2e74cba9718af9043cae9d0",
+          "state": "queued"
+        },
+        {
+          "tool": "project_result",
+          "job_id": "17ee0e94e2e74cba9718af9043cae9d0",
+          "state": "succeeded"
+        }
+      ]
+    }
+  ]
+}

@@ -190,19 +190,18 @@ section 3.
   Evidence: outbound transfer `03457b8540884be49790318b1b148603`; client locally
   verified returned README, spec, report, and patch hashes. Worker claims are not
   independent source-state verification.
-- [ ] **3.8** Detect concurrent project changes before patch application and protect
-  against clobbering them.
-  Status: Unfulfilled as generalized worker enforcement. Artifact hash
-  verification proves byte-preserving transfer/retrieval, not concurrent-change
-  detection or protection. This documentation assignment performed an informal
-  before-edit status/diff check and preserved preexisting edits, but that is not
-  proof of a reusable protection mechanism.
-- [ ] **3.9** Review and apply the patch through a separately authorized step, run
-  relevant checks, and save the end-to-end evidence.
-  Status: Recheck needed for current layout and current source state.
-- [ ] **3.10** Decide broader project allowlisting, patch transport, output truncation,
-  and resource limits before generalizing beyond model-bridge.
-  Status: Pending.
+- [ ] **3.8** Protect concurrent project changes before patch application.
+  Status: Local staging/guarded apply implemented and tested. Clean/stale,
+  edit/add/delete, tamper/link/escape and partial-apply fixtures pass. Installed
+  CLI sandbox boundaries remain pending; cooperative no-manual-edit apply window.
+- [ ] **3.9** Apply through separate authority and retain end-to-end evidence.
+  Status: Local registered-handler application/conflict fixtures passed. No
+  production apply; explicit production authority/client proof remains pending.
+- [x] **3.10** Agree project boundaries, patch transport and pilot resource limits.
+  Status: John approved the parameters; implemented locally. Only specifically
+  registered acheedev repos, separate transfer roots, private exclusions and
+  bounded full-artifact transport. Installed activation pending.
+  See [local pilot evidence and limits](STAGED_PILOT_2026-10-12.md).
 
 ## 4. Make background work dependable
 
@@ -211,30 +210,49 @@ section 3.
   Status: Implemented. Last verified: tests and documentation.
 - [x] **4.2** Serialize bootstrap jobs and mark queued/running work interrupted after
   restart without automatic replay.
-  Status: Implemented. Last verified: tests and documentation.
+  Status: Historical serialized bootstrap passed; current local pilot permits two
+  isolated stages and serializes apply per repo. Restart still never auto-replays.
 - [x] **4.3** Verify a model-driven job and result retrieval end to end.
   Status: Historically passed. Evidence: successful retry job
   `549ac2a1731a445fbf9b5b18a6ee4b1d` and outbound transfer
   `03457b8540884be49790318b1b148603`.
 - [ ] **4.4** Verify live cancellation end to end.
-  Status: Pending live proof. Implemented cancellation/recovery code and unit
-  coverage are not a completed live cancellation proof.
+  Status: Installed-client proof pending. New deterministic non-model demo
+  exercised registered submit/status/cancel/result/readback handlers, stopped
+  its fixture process tree, retained partial evidence, and verified durable
+  cancelled status/output hashes. Production jobs were not cancelled.
 - [ ] **4.5** Verify interruption recovery end to end after restart.
-  Status: Pending live proof. Implemented recovery behavior and unit coverage are
-  not a completed live recovery proof.
-- [ ] **4.6** Define the broader durable state model, restart policy, retention/disk
-  limits, and recovery rules.
-  Status: Pending.
-- [ ] **4.7** Add task dependencies, checkpoints, bounded parallelism, retries, and
-  resource budgets.
-  Status: Pending.
+  Status: Installed-restart proof pending. New isolated abrupt-crash demo
+  recorded running/queued interruption, retained partial files/before-status,
+  performed no automatic replay, and accepted a successful next fixture job.
+  No real service restart or model reasoning was tested.
+- [x] **4.6a** Implement minimum durable acceptance, checkpoints and disk/retention gates.
+  Status: Local implementation and disposable tests passed. Atomic idempotent
+  acceptance, interrupted/no-replay restart, storage refusal, explicit reviewed
+  retention and protected partial work. Installed activation pending; existing
+  user data was not deleted.
+- [ ] **4.6b** Advanced recovery.
+  Status: Backlog: automatic model resume/replay, rich dependency graphs,
+  arbitrary filesystem rollback and durable reasoning/stream replay.
+- [x] **4.7-local** Implement and prove two staged workers, safe retries and manual dependencies.
+  Status: Actual non-model overlap, memory admission, independent cancellation,
+  per-repo apply serialization, bounded retry/idempotency and two-active crash
+  fixtures passed. Manual B consumes verified successful A output; no DAG engine.
+- [ ] **4.7** Complete installed end-to-end parallel/retry client proof.
+  Status: CRITICAL remaining delivery gate. Reviewed source needs separately
+  authorized activation/CLI boundary validation and authenticated client proof.
+  No new paid calls or service changes authorized. See
+  [exact remaining proof](STAGED_PILOT_2026-10-12.md#remaining-activationclient-proof).
 - [ ] **4.8** Add status/pause/resume/cancel controls with clear stop rules for conflicts,
   exhausted limits, and stalled progress.
-  Status: Pending beyond the current bootstrap controls.
+  Status: Backlog beyond current status/cancel bootstrap controls; pause/resume
+  was not implemented in this assignment.
 - [ ] **4.9** Prove one unattended hour-long assignment before extending to multi-day
   projects.
-  Status: Pending. Evidence limit: one hour of reachable service is not one
-  unattended hour-long assignment.
+  Status: Backlog by John's final instruction; no hour job run. A future cheap
+  non-model heartbeat simulator proves mechanics, not useful model reasoning.
+  An hour exceeds the current 1800-second limit and needs a scoped isolated-test
+  override if chosen; no override was introduced.
 
 ## 5. Connect ChatGPT and bring in Gem
 

@@ -165,9 +165,10 @@ class JobTests(unittest.TestCase):
 
     def new_manager(self):
         return jobs.JobManager(self.store,state_dir=self.root/'state',projects={'model-bridge':self.project},
-             secrets_provider=lambda:['private-known-token'],command_factory=lambda *args:[sys.executable,str(self.stub)],start=False)
+             secrets_provider=lambda:['private-known-token'],command_factory=lambda *args:[sys.executable,str(self.stub)],start=False,available_memory=lambda:0)
 
     def submit(self, assignment='success', **kw):
+        kw.setdefault('target_paths',['artifact.txt','started','grandchild.pid'])
         return self.manager.submit(assignment,['done'],'model-bridge',{'edit':True,'test':True,'commit':False,'push':False},**kw)['job_id']
 
     def test_authority_project_resource_and_recursion_rejections(self):
@@ -211,7 +212,8 @@ class JobTests(unittest.TestCase):
         receipt=self.store.accept([encoded('reference.txt',b'reference bytes')])
         job_id=self.submit('consume',inbound_transfer_ids=[receipt['transfer_id']]);self.manager.run_once()
         self.assertEqual(self.manager.get(job_id)['state'],'succeeded')
-        self.assertEqual(list((self.project/'.worker-inputs').iterdir()),[])
+        self.assertFalse((self.project/'.worker-inputs').exists())
+        self.assertTrue((self.root/'state'/job_id/'inputs'/receipt['transfer_id']/'reference.txt').exists())
         job_id=self.submit('consume',inbound_transfer_ids=[receipt['transfer_id']])
         (self.root/'inbound'/receipt['transfer_id']/'reference.txt').write_bytes(b'tampered')
         self.manager.run_once();self.assertEqual(self.manager.get(job_id)['state'],'failed')
@@ -236,7 +238,7 @@ class JobTests(unittest.TestCase):
         with self.assertRaises(jobs.JobError):self.new_manager()
         first=self.submit('sleep');second=self.submit()
         thread=threading.Thread(target=self.manager.run_once);thread.start()
-        self.wait_for(self.project/'started')
+        self.wait_for(self.root/'state'/first/'workspace'/'started')
         self.assertFalse(self.manager.run_once())
         self.assertEqual(self.manager.get(second)['state'],'queued')
         self.manager.cancel(first);thread.join(5);self.assertFalse(thread.is_alive())
@@ -250,13 +252,15 @@ class JobTests(unittest.TestCase):
 
     def test_process_tree_cancellation_and_partial_changes_preserved(self):
         job_id=self.submit('tree');thread=threading.Thread(target=self.manager.run_once);thread.start()
-        self.wait_for(self.project/'grandchild.pid')
-        pid=int((self.project/'grandchild.pid').read_text());self.manager.cancel(job_id)
+        stage=self.root/'state'/job_id/'workspace'
+        self.wait_for(stage/'grandchild.pid')
+        pid=int((stage/'grandchild.pid').read_text());self.manager.cancel(job_id)
         thread.join(5);self.assertFalse(thread.is_alive())
         result=self.manager.get(job_id);self.assertEqual(result['state'],'cancelled')
         self.assertIsNotNone(result['cancel_requested_at'])
         self.assertIsNotNone(result['worker_stopped_at'])
-        self.assertTrue((self.project/'started').exists())
+        self.assertTrue((stage/'started').exists())
+        self.assertFalse((self.project/'started').exists())
         self.assertIn('started',result['partial_changes'])
         # A terminated grandchild may briefly remain a zombie until init reaps it.
         state=subprocess.run(['ps','-o','stat=','-p',str(pid)],capture_output=True,text=True).stdout.strip()
@@ -311,28 +315,24 @@ class JobTests(unittest.TestCase):
     def test_worker_configuration_enforces_policy_and_keeps_consultation_unchanged(self):
         before=codex_runner.CONFIG_OVERRIDES
         with patch.object(codex_runner,'executable',return_value='/usr/bin/codex'):
-            settings=self.manager.worker_settings(self.project,self.root/'state'/'job')
+            settings=self.manager.worker_settings(self.root/'state'/'job'/'workspace',self.root/'state'/'job')
         text='\n'.join(settings)
-        self.assertIn(str(self.project/'.worker-inputs')+'"="read"',text)
+        self.assertIn(str(self.root/'state'/'job'/'inputs')+'"="read"',text)
+        self.assertIn(str(self.project)+'"="deny"',text)
         self.assertIn(str(self.manager.state_dir)+'"="deny"',text)
-        self.assertNotIn(str(self.root/'state'/'job'/'inputs'),text)
-        for required in ('approval_policy="never"','mcp_servers={}','network.enabled=false','":root"="deny"','":slash_tmp"="deny"','/.git"="read"','features.multi_agent=false'):
+        for required in ('approval_policy="never"','mcp_servers={}','network.enabled=false','":root"="deny"','":slash_tmp"="deny"','features.multi_agent=false'):
             self.assertIn(required,text)
         self.assertEqual(before,codex_runner.CONFIG_OVERRIDES)
         self.assertIn('sandbox_mode="read-only"',before)
 
-    def test_active_inputs_cleaned_after_interruption_and_failure(self):
-        root=self.project/'.worker-inputs'
-        root.mkdir(mode=0o700)
-        stale=root/('f'*32);stale.mkdir(mode=0o700)
-        (stale/'old.txt').write_bytes(b'previous job')
-        with self.assertRaises(RuntimeError):
-            with self.manager.input_workspace(self.project) as inputs:
-                self.assertEqual(list(inputs.iterdir()),[])
-                active=inputs/('a'*32);active.mkdir(mode=0o700)
-                (active/'reference.txt').write_bytes(b'active job')
-                raise RuntimeError('cancelled or failed')
-        self.assertEqual(list(root.iterdir()),[])
+    def test_per_job_inputs_retained_without_clearing_another_job(self):
+        first=self.root/'state'/'first';second=self.root/'state'/'second'
+        with self.manager.input_workspace(first) as inputs:
+            (inputs/'reference.txt').write_bytes(b'first')
+            with self.manager.input_workspace(second) as other:
+                (other/'reference.txt').write_bytes(b'second')
+        self.assertEqual((first/'inputs'/'reference.txt').read_bytes(),b'first')
+        self.assertEqual((second/'inputs'/'reference.txt').read_bytes(),b'second')
 
 
 class RegistrationTests(unittest.TestCase):

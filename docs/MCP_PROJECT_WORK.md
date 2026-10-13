@@ -1,5 +1,7 @@
 # MCP transfers and authorized project work
 
+October 12 source contract: [staged pilot](STAGED_PILOT_2026-10-12.md). It supersedes the direct-edit/shared-input bootstrap described below. Installed service activation remains pending. Updated schemas include target_paths, idempotency/dependency inputs, project_apply, project_review and project_retention.
+
 This is separate from `ask_codex`/`ask_claude`. Consultations retain their isolated,
 read-only supplied-context behavior. `project_submit` authorizes an implementation
 worker with shell tools and project edits; it can consume ChatGPT subscription
@@ -107,6 +109,18 @@ values are rejected in assignments and redacted in saved results and stdout.
 Raw worker stderr is discarded. Invalid raw result files are deleted, valid
 results are replaced with their sanitized form, and isolated authentication homes
 are removed after execution, including failure/cancellation.
+
+Storage admission counts regular files in active workers' exact private
+`job-data/<job_id>/home` directories, without following runtime symlinks. Runtime
+links, sockets, FIFOs, and entries removed during home cleanup do not reject the
+job. This exception does not apply to the home directory itself, the staged
+workspace (including scratch), job records, or outbound artifacts: those remain
+strict. Rejected special entries report `unsafe_managed_storage` with `path` and
+`file_type` (the first character of Unix file mode, e.g. `l`, `s`, or `p`). Job
+records preserve these details in `storage_error`; admission blocks retain the
+same error code in `admission_error`. Diagnostics use the job's existing secret
+redaction. The historical October 13 failure did not record its offending path,
+so its exact runtime entry remains unconfirmed.
 
 Filename filtering and known-value checks cannot identify every secret embedded
 in arbitrary content. Clients/workers must not submit or publish unknown private
